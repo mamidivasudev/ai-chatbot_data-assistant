@@ -27,8 +27,6 @@ from mssql_schema_reader import (
 from mssql_sql_generator import generate_tsql, generate_answer_summary, generate_rule_from_sql
 from mssql_executor import validate_tsql, execute_tsql
 from history_manager import init_db, save_chat, get_business_rules, save_business_rules, save_user_suggestion, get_user_suggestions, get_chat_history, clear_chat_history
-from file_reader import read_project
-from search_engine import search_files
 
 # Import unified adapters
 from db_adapters import (
@@ -556,8 +554,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     # Mode Toggle
-    is_file_reader = st.toggle("📁 File Reader Mode", value=False)
-    mode = "File Reader AI Assistant" if is_file_reader else "Database AI Assistant"
+    mode = "Database AI Assistant"
 
     # Database selection
     if mode == "Database AI Assistant":
