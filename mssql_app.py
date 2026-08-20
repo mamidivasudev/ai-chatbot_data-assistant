@@ -554,7 +554,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     # Mode Toggle
-    mode = "Database AI Assistant"
+    mode = st.sidebar.radio("Mode", ["Database AI Assistant", "File Reader AI Assistant"], label_visibility="collapsed")
 
     # Database selection
     if mode == "Database AI Assistant":
