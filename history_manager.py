@@ -185,3 +185,64 @@ def save_user_suggestion(db_type, tables, question):
             json.dump(data, f, indent=4)
     except Exception:
         pass
+
+def get_business_skills(db_identifier):
+    if not db_identifier:
+        return []
+    if os.path.exists(BUSINESS_RULES_FILE):
+        try:
+            import json
+            with open(BUSINESS_RULES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                target_key = db_identifier.strip().lower()
+                for k, v in data.items():
+                    if k.strip().lower() == target_key:
+                        # Migrate old string format to new list format
+                        if isinstance(v, str):
+                            return [{"category": "General Rules", "keywords": [], "rule_text": v}]
+                        return v
+                return []
+        except Exception:
+            pass
+    return []
+
+def save_business_skills(db_identifier, skills_list):
+    if not db_identifier:
+        return
+    import json
+    data = {}
+    if os.path.exists(BUSINESS_RULES_FILE):
+        try:
+            with open(BUSINESS_RULES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            pass
+            
+    data[db_identifier] = skills_list
+    
+    try:
+        with open(BUSINESS_RULES_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+    except Exception:
+        pass
+
+def filter_rules_by_keywords(question, db_identifier):
+    skills = get_business_skills(db_identifier)
+    if not skills:
+        return ""
+        
+    q_lower = question.lower()
+    matched_rules = []
+    
+    for skill in skills:
+        keywords = skill.get("keywords", [])
+        # If no keywords, it's a global rule
+        if not keywords:
+            matched_rules.append(f"## {skill.get('category', 'Global Rule')}\n{skill.get('rule_text', '')}")
+            continue
+            
+        # Check if any keyword matches
+        if any(kw.strip().lower() in q_lower for kw in keywords if kw.strip()):
+            matched_rules.append(f"## {skill.get('category', 'Specific Rule')}\n{skill.get('rule_text', '')}")
+            
+    return "\n\n".join(matched_rules)

@@ -1,7 +1,317 @@
 {
-    "dev_MS SQL_Hims_Zrams": "1. BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n32. To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n33. ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n34. LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n35. ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster, and join LinkMaster lm with RoadMaster rm on lm.RoadCode = rm.RoadCode rm, and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n36. TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n37. TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode\n38. BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage).\n39. TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n40. VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'.\n41. VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'.\n42. COLUMN CLARIFICATION: The 'Roads' table uses 'Road_id'. The 'RoadMaster' and 'LinkMaster' tables use 'RoadCode'. Never use RoadCode on the Roads table.\n43. DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules 32-41. When asked for detailed inventory or conditions about a specific road or district (e.g., length of a specific road, pavement condition, PCI), you MUST use the Roads, Road_Sections, and Pavement_Condition tables.\n44. TERMINOLOGY SYNONYMS: The user may use full names instead of abbreviations. State Highway means SH. Major District Road means MDR. Other District Road means ODR. Village Road means VR. Substitute the full names with these exact abbreviations when applying filters.",
-    "dev_MS SQL_HIMS_ZRAMS": "1. Total length means End_km - Start_km or the Length_km / Total_Length_km columns.\n2. For IRI, always use the column named IRI.\n3. STRICT SQL SYNTAX: NEVER use more than one 'FROM' clause. All tables MUST be connected using 'INNER JOIN' or 'LEFT JOIN' immediately after the first FROM clause and BEFORE the WHERE clause.\n4. LOGICAL GROUPING: Whenever you use 'OR' in a WHERE clause, you MUST wrap the OR conditions in parentheses (e.g., AND (type LIKE '%a%' OR type LIKE '%b%')).\n5. FILTERING: Whenever the user asks for a specific District, Road, or Section, ALWAYS filter using their exact literal values in the WHERE clause (e.g., WHERE District = 'Jhalawar' or Road_id = 123). Do NOT use SQL parameters like @District.\n6. MANDATORY JOINS: When querying Road_Sections: ALWAYS INNER JOIN Roads ON Road_Sections.Road_id = Roads.Road_id. When querying Pavement_Condition: ALWAYS INNER JOIN Road_Sections ON Pavement_Condition.Section_id = Road_Sections.Section_id AND INNER JOIN Roads ON Pavement_Condition.Road_id = Roads.Road_id. When querying Traffic_Data: ALWAYS INNER JOIN Road_Sections ON Traffic_Data.section_id = Road_Sections.Section_id INNER JOIN Roads ON Road_Sections.Road_id = Roads.Road_id.\n7. STANDARD SELECT COLUMNS: Whenever listing roads, ALWAYS include Road_id, Road_Name, Start_km, End_km, and Total_Length_km from the Roads table. Use CAST(AVG(metric) AS DECIMAL(10,2)) when averaging condition metrics.\n8. ROAD INVENTORY DEFINITIONS: 'State Highway' = Road_Class='SH' | 'National Highway' = Road_Class='NH' | 'MDR' = Road_Class='MDR'. Pavement Types: Use LIKE '%flexible pavement%' or LIKE '%Rigid pavement%'.\n9. CONDITION CLASSIFICATIONS (Use CASE Statements): PCI Condition: <=1 'Very Poor', >1 AND <=2 'Poor', >2 AND <=3 'Fair', >3 AND <=4 'Good', >4 'Very Good'. Cracking / Pothole / EdgeBreak Condition: <=0 'Very Good', >0.1 AND <=10 'Good', >10.1 AND <=30 'Fair', >30.1 AND <=60 'Poor', >60.1 AND <=90 'Very Poor'.\n10. CONDITION LOOKUP TABLES: For IRI Condition: LEFT JOIN LKPTRISRgh ON IRI >= MinIRI AND IRI <= MaxIRI (Return Catg). 'High roughness' means Grade=4. For Rutting: LEFT JOIN LKPTRISRutSev ON Rutting_mm >= Min AND Rutting_mm < Max (Return Name).\n11. TRAFFIC DATA LOGIC: 'Busiest' or 'Heavy' traffic means AADT > 10000 or TrfCatg=6. 'Moderate' traffic means TrfCatg=3. 'Total Trucks' = TwoAxle + ThrAxle + MultiAxle. 'Traffic Growth Percentage' = (SUM(AADT) - LAG(SUM(AADT)) OVER (PARTITION BY Road_id ORDER BY survey_year)) * 100.0 / NULLIF(LAG(SUM(AADT)) OVER (PARTITION BY Road_id ORDER BY survey_year),0).\n12. ALIAS STRICTNESS: ALWAYS strictly use the exact alias defined in the FROM or JOIN clause. Never invent an alias like 'p.' if the table is aliased as 'pc.'.\n13. Generate only valid Microsoft SQL Server (T-SQL).\n14. Generate SELECT statements only.\n15. Never generate INSERT, UPDATE, DELETE, MERGE, DROP, ALTER, CREATE or TRUNCATE statements.\n16. Always qualify every column with its table alias.\n17. Always use the exact alias defined in the FROM or JOIN clause.\n18. Never invent aliases.\n19. Use descriptive aliases for tables.\n20. Use TOP only when explicitly requested by the user.\n21. Never use SELECT *.\n22. Return only the columns required by the user.\n23. Whenever querying Road_Sections, always use  FROM Road_Sections rs INNER JOIN Roads r ON rs.Road_id = r.Road_id\n24. Whenever querying Pavement_Condition, always use FROM Pavement_Condition pc INNER JOIN Road_Sections rs ON pc.Section_id rs.Section_id INNER JOIN Roads r ON pc.Road_id = r.Road_id\n25. Always use literal values.\n26. Never generate SQL parameters such as @District or @Road.\n27. Whenever filtering by District, Road or Section, use exact values. Example WHERE r.District='Jhalawar'\n28. Whenever multiple OR conditions are used, they must always be enclosed within parentheses. Correct WHERE r.District='Jhalawar' AND (r.Road_Class='SH' OR r.Road_Class='NH')\n29.\n30. When asked about IRI conditions (e.g. less than 4 IRI), you MUST query all three IRI columns using OR. Example: WHERE (LWPIRI < 4 OR RWPIRI < 4 OR LaneIRI < 4). Do not use IRIGrade.\n31. BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n32. To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n33. ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n34. LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n35. ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster, and join LinkMaster lm with RoadMaster rm on lm.RoadCode = rm.RoadCode rm, and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n36. TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n37. TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode\n38. BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage).\n39. TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n40. VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'.\n41. VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'.\n42. COLUMN CLARIFICATION: The 'Roads' table uses 'Road_id'. The 'RoadMaster' and 'LinkMaster' tables use 'RoadCode'. Never use RoadCode on the Roads table.\n43. DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules 32-41. When asked for detailed inventory or conditions about a specific road or district (e.g., length of a specific road, pavement condition, PCI), you MUST use the Roads, Road_Sections, and Pavement_Condition tables.\n44. TERMINOLOGY SYNONYMS: The user may use full names instead of abbreviations. State Highway means SH. Major District Road means MDR. Other District Road means ODR. Village Road means VR. Substitute the full names with these exact abbreviations when applying filters.",
-    "dev_MS SQL_hims_zrams": "1. Total length means End_km - Start_km or the Length_km / Total_Length_km columns.\n2. For IRI, always use the column named IRI.\n3. STRICT SQL SYNTAX: NEVER use more than one 'FROM' clause. All tables MUST be connected using 'INNER JOIN' or 'LEFT JOIN' immediately after the first FROM clause and BEFORE the WHERE clause.\n4. LOGICAL GROUPING: Whenever you use 'OR' in a WHERE clause, you MUST wrap the OR conditions in parentheses (e.g., AND (type LIKE '%a%' OR type LIKE '%b%')).\n5. FILTERING: Whenever the user asks for a specific District, Road, or Section, ALWAYS filter using their exact literal values in the WHERE clause (e.g., WHERE District = 'Jhalawar' or Road_id = 123). Do NOT use SQL parameters like @District.\n6. MANDATORY JOINS: When querying Road_Sections: ALWAYS INNER JOIN Roads ON Road_Sections.Road_id = Roads.Road_id. When querying Pavement_Condition: ALWAYS INNER JOIN Road_Sections ON Pavement_Condition.Section_id = Road_Sections.Section_id AND INNER JOIN Roads ON Pavement_Condition.Road_id = Roads.Road_id. When querying Traffic_Data: ALWAYS INNER JOIN Road_Sections ON Traffic_Data.section_id = Road_Sections.Section_id INNER JOIN Roads ON Road_Sections.Road_id = Roads.Road_id.\n7. STANDARD SELECT COLUMNS: Whenever listing roads, ALWAYS include Road_id, Road_Name, Start_km, End_km, and Total_Length_km from the Roads table. Use CAST(AVG(metric) AS DECIMAL(10,2)) when averaging condition metrics.\n8. ROAD INVENTORY DEFINITIONS: 'State Highway' = Road_Class='SH' | 'National Highway' = Road_Class='NH' | 'MDR' = Road_Class='MDR'. Pavement Types: Use LIKE '%flexible pavement%' or LIKE '%Rigid pavement%'.\n9. CONDITION CLASSIFICATIONS (Use CASE Statements): PCI Condition: <=1 'Very Poor', >1 AND <=2 'Poor', >2 AND <=3 'Fair', >3 AND <=4 'Good', >4 'Very Good'. Cracking / Pothole / EdgeBreak Condition: <=0 'Very Good', >0.1 AND <=10 'Good', >10.1 AND <=30 'Fair', >30.1 AND <=60 'Poor', >60.1 AND <=90 'Very Poor'.\n10. CONDITION LOOKUP TABLES: For IRI Condition: LEFT JOIN LKPTRISRgh ON IRI >= MinIRI AND IRI <= MaxIRI (Return Catg). 'High roughness' means Grade=4. For Rutting: LEFT JOIN LKPTRISRutSev ON Rutting_mm >= Min AND Rutting_mm < Max (Return Name).\n11. TRAFFIC DATA LOGIC: 'Busiest' or 'Heavy' traffic means AADT > 10000 or TrfCatg=6. 'Moderate' traffic means TrfCatg=3. 'Total Trucks' = TwoAxle + ThrAxle + MultiAxle. 'Traffic Growth Percentage' = (SUM(AADT) - LAG(SUM(AADT)) OVER (PARTITION BY Road_id ORDER BY survey_year)) * 100.0 / NULLIF(LAG(SUM(AADT)) OVER (PARTITION BY Road_id ORDER BY survey_year),0).\n12. ALIAS STRICTNESS: ALWAYS strictly use the exact alias defined in the FROM or JOIN clause. Never invent an alias like 'p.' if the table is aliased as 'pc.'.\n30. When asked about IRI conditions (e.g. less than 4 IRI), you MUST query all three IRI columns using OR. Example: WHERE (LWPIRI < 4 OR RWPIRI < 4 OR LaneIRI < 4). Do not use IRIGrade.\n31. BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n32. To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n33. ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n34. LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n35. ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster, and join LinkMaster lm with RoadMaster rm on lm.RoadCode = rm.RoadCode rm, and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n36. TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n37. TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode\n38. BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage).\n39. TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n40. VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'.\n41. VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'.\n42. COLUMN CLARIFICATION: The 'Roads' table uses 'Road_id'. The 'RoadMaster' and 'LinkMaster' tables use 'RoadCode'. Never use RoadCode on the Roads table.\n43. DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules 32-41. When asked for detailed inventory or conditions about a specific road or district (e.g., length of a specific road, pavement condition, PCI), you MUST use the Roads, Road_Sections, and Pavement_Condition tables.\n44. TERMINOLOGY SYNONYMS: The user may use full names instead of abbreviations. State Highway means SH. Major District Road means MDR. Other District Road means ODR. Village Road means VR. Substitute the full names with these exact abbreviations when applying filters.",
-    "dev_MS SQL_HIMS_Zrams": "1. BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n32. To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n33. ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n34. LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n35. ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster, and join LinkMaster lm with RoadMaster rm on lm.RoadCode = rm.RoadCode rm, and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n36. TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n37. TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode\n38. BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage).\n39. TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n40. VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'.\n41. VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'.\n42. COLUMN CLARIFICATION: The 'Roads' table uses 'Road_id'. The 'RoadMaster' and 'LinkMaster' tables use 'RoadCode'. Never use RoadCode on the Roads table.\n43. DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules 32-41. When asked for detailed inventory or conditions about a specific road or district (e.g., length of a specific road, pavement condition, PCI), you MUST use the Roads, Road_Sections, and Pavement_Condition tables.\n44. TERMINOLOGY SYNONYMS: The user may use full names instead of abbreviations. State Highway means SH. Major District Road means MDR. Other District Road means ODR. Village Road means VR. Substitute the full names with these exact abbreviations when applying filters.",
-    "dev_MS SQL_hims_ZRAMS": "1. Always retrieve data from RoadDetails_Vani table.\n2. When a question is asked about a road, include where condition as \"Roadcode=\"\n3. include linkcode column in where clause only if the query is asked by a link.\n4. If multiple rows contain identical data for the requested information, treat them as duplicate records.\n5. Return only one record for duplicate data.\n6. Prefer using the DISTINCT keyword whenever appropriate.\n7. If duplicates still exist because of additional columns, return only the first record using ROW_NUMBER() or TOP (1) with an appropriate ORDER BY clause.\n8. Include the DISTINCT keyword in the SELECT statement whenever there is a possibility of duplicate rows being returned.\n9. To determine the length of a road, retrieve the value from the Length column in the RoadDetails_Vani table for a specific road code.\n10. Always use llength column to find the length of Link.\n11. Always use Length column to find the length of Road.\n12. Use category column to classify roads as SH Roads, MDR Roads etc.\n13. When asked for how many types of road categories are there, get distinct count from Roadclass column.\n14. Class, Category are the synonyms for Road Category.\n15. Major Roads means, roads of Category SH\n16. district Roads means, Roads of category MDR\n17. When the question is not about a specific road, dont use Roadcode in where clause\n18.\n30. When asked about IRI conditions (e.g. less than 4 IRI), you MUST query all three IRI columns using OR. Example: WHERE (LWPIRI < 4 OR RWPIRI < 4 OR LaneIRI < 4). Do not use IRIGrade.\n31. BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n32. To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n33. ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n34. LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n35. ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster, and join LinkMaster lm with RoadMaster rm on lm.RoadCode = rm.RoadCode rm, and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n36. TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n37. TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode\n38. BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage).\n39. TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n40. VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'.\n41. VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'.\n42. COLUMN CLARIFICATION: The 'Roads' table uses 'Road_id'. The 'RoadMaster' and 'LinkMaster' tables use 'RoadCode'. Never use RoadCode on the Roads table.\n43. DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules 32-41. When asked for detailed inventory or conditions about a specific road or district (e.g., length of a specific road, pavement condition, PCI), you MUST use the Roads, Road_Sections, and Pavement_Condition tables.\n44. TERMINOLOGY SYNONYMS: The user may use full names instead of abbreviations. State Highway means SH. Major District Road means MDR. Other District Road means ODR. Village Road means VR. Substitute the full names with these exact abbreviations when applying filters."
+    "dev_MS SQL_Hims_Zrams": [
+        {
+            "category": "General Database Rules",
+            "keywords": [],
+            "rule_text": "1. Always retrieve data from RoadDetails_Vani table.\n2. When a question is asked about a road, include where condition as 'Roadcode='\n3. include linkcode column in where clause only if the query is asked by a link.\n4. If multiple rows contain identical data for the requested information, treat them as duplicate records.\n5. Return only one record for duplicate data.\n6. Prefer using the DISTINCT keyword whenever appropriate.\n7. If duplicates still exist because of additional columns, return only the first record using ROW_NUMBER() or TOP (1) with an appropriate ORDER BY clause.\n8. Include the DISTINCT keyword in the SELECT statement whenever there is a possibility of duplicate rows being returned.\n9. To determine the length of a road, retrieve the value from the Length column in the RoadDetails_Vani table for a specific road code.\n10. Always use llength column to find the length of Link.\n11. Always use Length column to find the length of Road.\n12. Use category column to classify roads as SH Roads, MDR Roads etc.\n13. When asked for how many types of road categories are there, get distinct count from Roadclass column.\n14. Class, Category are the synonyms for Road Category.\n15. Major Roads means, roads of Category SH\n16. district Roads means, Roads of category MDR\n17. When the question is not about a specific road, dont use Roadcode in where clause\n42. COLUMN CLARIFICATION: The 'Roads' table uses 'Road_id'. The 'RoadMaster' and 'LinkMaster' tables use 'RoadCode'. Never use RoadCode on the Roads table.\n44. TERMINOLOGY SYNONYMS: The user may use full names instead of abbreviations. State Highway means SH. Major District Road means MDR. Other District Road means ODR. Village Road means VR. Substitute the full names with these exact abbreviations when applying filters."
+        },
+        {
+            "category": "Pavement Condition & IRI",
+            "keywords": [
+                "iri",
+                "poor",
+                "condition",
+                "roughness",
+                "stretch"
+            ],
+            "rule_text": "30. When asked about IRI conditions (e.g. less than 4 IRI), you MUST query all three IRI columns using OR. Example: WHERE (LWPIRI < 4 OR RWPIRI < 4 OR LaneIRI < 4). Do not use IRIGrade.\n41. VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'."
+        },
+        {
+            "category": "Bridge Inventory & Condition",
+            "keywords": [
+                "bridge",
+                "min",
+                "maj",
+                "minor",
+                "major"
+            ],
+            "rule_text": "31. BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n39. TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n40. VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'."
+        },
+        {
+            "category": "Traffic & Stations",
+            "keywords": [
+                "traffic",
+                "station",
+                "tvc",
+                "vehicle"
+            ],
+            "rule_text": "32. To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n37. TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode"
+        },
+        {
+            "category": "Road Lengths & Dashboard Metrics",
+            "keywords": [
+                "length",
+                "total",
+                "count",
+                "network",
+                "dashboard",
+                "sh",
+                "mdr",
+                "vr"
+            ],
+            "rule_text": "33. ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n34. LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n35. ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster, and join LinkMaster lm with RoadMaster rm on lm.RoadCode = rm.RoadCode rm, and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n36. TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n43. DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules 32-41. When asked for detailed inventory or conditions about a specific road or district (e.g., length of a specific road, pavement condition, PCI), you MUST use the Roads, Road_Sections, and Pavement_Condition tables."
+        },
+        {
+            "category": "Safety & Black Spots",
+            "keywords": [
+                "black spot",
+                "accident",
+                "crash",
+                "safety"
+            ],
+            "rule_text": "38. BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage)."
+        }
+    ],
+    "dev_MS SQL_HIMS_ZRAMS": [
+        {
+            "category": "General Database Rules",
+            "keywords": [],
+            "rule_text": "1. Always retrieve data from RoadDetails_Vani table.\n2. When a question is asked about a road, include where condition as 'Roadcode='\n3. include linkcode column in where clause only if the query is asked by a link.\n4. If multiple rows contain identical data for the requested information, treat them as duplicate records.\n5. Return only one record for duplicate data.\n6. Prefer using the DISTINCT keyword whenever appropriate.\n7. If duplicates still exist because of additional columns, return only the first record using ROW_NUMBER() or TOP (1) with an appropriate ORDER BY clause.\n8. Include the DISTINCT keyword in the SELECT statement whenever there is a possibility of duplicate rows being returned.\n9. To determine the length of a road, retrieve the value from the Length column in the RoadDetails_Vani table for a specific road code.\n10. Always use llength column to find the length of Link.\n11. Always use Length column to find the length of Road.\n12. Use category column to classify roads as SH Roads, MDR Roads etc.\n13. When asked for how many types of road categories are there, get distinct count from Roadclass column.\n14. Class, Category are the synonyms for Road Category.\n15. Major Roads means, roads of Category SH\n16. district Roads means, Roads of category MDR\n17. When the question is not about a specific road, dont use Roadcode in where clause\n42. COLUMN CLARIFICATION: The 'Roads' table uses 'Road_id'. The 'RoadMaster' and 'LinkMaster' tables use 'RoadCode'. Never use RoadCode on the Roads table.\n44. TERMINOLOGY SYNONYMS: The user may use full names instead of abbreviations. State Highway means SH. Major District Road means MDR. Other District Road means ODR. Village Road means VR. Substitute the full names with these exact abbreviations when applying filters."
+        },
+        {
+            "category": "Pavement Condition & IRI",
+            "keywords": [
+                "iri",
+                "poor",
+                "condition",
+                "roughness",
+                "stretch"
+            ],
+            "rule_text": "30. When asked about IRI conditions (e.g. less than 4 IRI), you MUST query all three IRI columns using OR. Example: WHERE (LWPIRI < 4 OR RWPIRI < 4 OR LaneIRI < 4). Do not use IRIGrade.\n41. VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'."
+        },
+        {
+            "category": "Bridge Inventory & Condition",
+            "keywords": [
+                "bridge",
+                "min",
+                "maj",
+                "minor",
+                "major"
+            ],
+            "rule_text": "31. BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n39. TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n40. VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'."
+        },
+        {
+            "category": "Traffic & Stations",
+            "keywords": [
+                "traffic",
+                "station",
+                "tvc",
+                "vehicle"
+            ],
+            "rule_text": "32. To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n37. TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode"
+        },
+        {
+            "category": "Road Lengths & Dashboard Metrics",
+            "keywords": [
+                "length",
+                "total",
+                "count",
+                "network",
+                "dashboard",
+                "sh",
+                "mdr",
+                "vr"
+            ],
+            "rule_text": "33. ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n34. LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n35. ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster, and join LinkMaster lm with RoadMaster rm on lm.RoadCode = rm.RoadCode rm, and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n36. TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n43. DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules 32-41. When asked for detailed inventory or conditions about a specific road or district (e.g., length of a specific road, pavement condition, PCI), you MUST use the Roads, Road_Sections, and Pavement_Condition tables."
+        },
+        {
+            "category": "Safety & Black Spots",
+            "keywords": [
+                "black spot",
+                "accident",
+                "crash",
+                "safety"
+            ],
+            "rule_text": "38. BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage)."
+        }
+    ],
+    "dev_MS SQL_hims_zrams": [
+        {
+            "category": "General Database Rules",
+            "keywords": [],
+            "rule_text": "1. Always retrieve data from RoadDetails_Vani table.\n2. When a question is asked about a road, include where condition as 'Roadcode='\n3. include linkcode column in where clause only if the query is asked by a link.\n4. If multiple rows contain identical data for the requested information, treat them as duplicate records.\n5. Return only one record for duplicate data.\n6. Prefer using the DISTINCT keyword whenever appropriate.\n7. If duplicates still exist because of additional columns, return only the first record using ROW_NUMBER() or TOP (1) with an appropriate ORDER BY clause.\n8. Include the DISTINCT keyword in the SELECT statement whenever there is a possibility of duplicate rows being returned.\n9. To determine the length of a road, retrieve the value from the Length column in the RoadDetails_Vani table for a specific road code.\n10. Always use llength column to find the length of Link.\n11. Always use Length column to find the length of Road.\n12. Use category column to classify roads as SH Roads, MDR Roads etc.\n13. When asked for how many types of road categories are there, get distinct count from Roadclass column.\n14. Class, Category are the synonyms for Road Category.\n15. Major Roads means, roads of Category SH\n16. district Roads means, Roads of category MDR\n17. When the question is not about a specific road, dont use Roadcode in where clause\n42. COLUMN CLARIFICATION: The 'Roads' table uses 'Road_id'. The 'RoadMaster' and 'LinkMaster' tables use 'RoadCode'. Never use RoadCode on the Roads table.\n44. TERMINOLOGY SYNONYMS: The user may use full names instead of abbreviations. State Highway means SH. Major District Road means MDR. Other District Road means ODR. Village Road means VR. Substitute the full names with these exact abbreviations when applying filters."
+        },
+        {
+            "category": "Pavement Condition & IRI",
+            "keywords": [
+                "iri",
+                "poor",
+                "condition",
+                "roughness",
+                "stretch"
+            ],
+            "rule_text": "30. When asked about IRI conditions (e.g. less than 4 IRI), you MUST query all three IRI columns using OR. Example: WHERE (LWPIRI < 4 OR RWPIRI < 4 OR LaneIRI < 4). Do not use IRIGrade.\n41. VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'."
+        },
+        {
+            "category": "Bridge Inventory & Condition",
+            "keywords": [
+                "bridge",
+                "min",
+                "maj",
+                "minor",
+                "major"
+            ],
+            "rule_text": "31. BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n39. TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n40. VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'."
+        },
+        {
+            "category": "Traffic & Stations",
+            "keywords": [
+                "traffic",
+                "station",
+                "tvc",
+                "vehicle"
+            ],
+            "rule_text": "32. To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n37. TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode"
+        },
+        {
+            "category": "Road Lengths & Dashboard Metrics",
+            "keywords": [
+                "length",
+                "total",
+                "count",
+                "network",
+                "dashboard",
+                "sh",
+                "mdr",
+                "vr"
+            ],
+            "rule_text": "33. ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n34. LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n35. ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster, and join LinkMaster lm with RoadMaster rm on lm.RoadCode = rm.RoadCode rm, and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n36. TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n43. DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules 32-41. When asked for detailed inventory or conditions about a specific road or district (e.g., length of a specific road, pavement condition, PCI), you MUST use the Roads, Road_Sections, and Pavement_Condition tables."
+        },
+        {
+            "category": "Safety & Black Spots",
+            "keywords": [
+                "black spot",
+                "accident",
+                "crash",
+                "safety"
+            ],
+            "rule_text": "38. BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage)."
+        }
+    ],
+    "dev_MS SQL_HIMS_Zrams": [
+        {
+            "category": "General Database Rules",
+            "keywords": [],
+            "rule_text": "1. Always retrieve data from RoadDetails_Vani table.\n2. When a question is asked about a road, include where condition as 'Roadcode='\n3. include linkcode column in where clause only if the query is asked by a link.\n4. If multiple rows contain identical data for the requested information, treat them as duplicate records.\n5. Return only one record for duplicate data.\n6. Prefer using the DISTINCT keyword whenever appropriate.\n7. If duplicates still exist because of additional columns, return only the first record using ROW_NUMBER() or TOP (1) with an appropriate ORDER BY clause.\n8. Include the DISTINCT keyword in the SELECT statement whenever there is a possibility of duplicate rows being returned.\n9. To determine the length of a road, retrieve the value from the Length column in the RoadDetails_Vani table for a specific road code.\n10. Always use llength column to find the length of Link.\n11. Always use Length column to find the length of Road.\n12. Use category column to classify roads as SH Roads, MDR Roads etc.\n13. When asked for how many types of road categories are there, get distinct count from Roadclass column.\n14. Class, Category are the synonyms for Road Category.\n15. Major Roads means, roads of Category SH\n16. district Roads means, Roads of category MDR\n17. When the question is not about a specific road, dont use Roadcode in where clause\n42. COLUMN CLARIFICATION: The 'Roads' table uses 'Road_id'. The 'RoadMaster' and 'LinkMaster' tables use 'RoadCode'. Never use RoadCode on the Roads table.\n44. TERMINOLOGY SYNONYMS: The user may use full names instead of abbreviations. State Highway means SH. Major District Road means MDR. Other District Road means ODR. Village Road means VR. Substitute the full names with these exact abbreviations when applying filters."
+        },
+        {
+            "category": "Pavement Condition & IRI",
+            "keywords": [
+                "iri",
+                "poor",
+                "condition",
+                "roughness",
+                "stretch"
+            ],
+            "rule_text": "30. When asked about IRI conditions (e.g. less than 4 IRI), you MUST query all three IRI columns using OR. Example: WHERE (LWPIRI < 4 OR RWPIRI < 4 OR LaneIRI < 4). Do not use IRIGrade.\n41. VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'."
+        },
+        {
+            "category": "Bridge Inventory & Condition",
+            "keywords": [
+                "bridge",
+                "min",
+                "maj",
+                "minor",
+                "major"
+            ],
+            "rule_text": "31. BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n39. TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n40. VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'."
+        },
+        {
+            "category": "Traffic & Stations",
+            "keywords": [
+                "traffic",
+                "station",
+                "tvc",
+                "vehicle"
+            ],
+            "rule_text": "32. To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n37. TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode"
+        },
+        {
+            "category": "Road Lengths & Dashboard Metrics",
+            "keywords": [
+                "length",
+                "total",
+                "count",
+                "network",
+                "dashboard",
+                "sh",
+                "mdr",
+                "vr"
+            ],
+            "rule_text": "33. ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n34. LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n35. ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster, and join LinkMaster lm with RoadMaster rm on lm.RoadCode = rm.RoadCode rm, and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n36. TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n43. DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules 32-41. When asked for detailed inventory or conditions about a specific road or district (e.g., length of a specific road, pavement condition, PCI), you MUST use the Roads, Road_Sections, and Pavement_Condition tables."
+        },
+        {
+            "category": "Safety & Black Spots",
+            "keywords": [
+                "black spot",
+                "accident",
+                "crash",
+                "safety"
+            ],
+            "rule_text": "38. BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage)."
+        }
+    ],
+    "dev_MS SQL_hims_ZRAMS": [
+        {
+            "category": "General Database Rules",
+            "keywords": [],
+            "rule_text": "1. Always retrieve data from RoadDetails_Vani table.\n2. When a question is asked about a road, include where condition as 'Roadcode='\n3. include linkcode column in where clause only if the query is asked by a link.\n4. If multiple rows contain identical data for the requested information, treat them as duplicate records.\n5. Return only one record for duplicate data.\n6. Prefer using the DISTINCT keyword whenever appropriate.\n7. If duplicates still exist because of additional columns, return only the first record using ROW_NUMBER() or TOP (1) with an appropriate ORDER BY clause.\n8. Include the DISTINCT keyword in the SELECT statement whenever there is a possibility of duplicate rows being returned.\n9. To determine the length of a road, retrieve the value from the Length column in the RoadDetails_Vani table for a specific road code.\n10. Always use llength column to find the length of Link.\n11. Always use Length column to find the length of Road.\n12. Use category column to classify roads as SH Roads, MDR Roads etc.\n13. When asked for how many types of road categories are there, get distinct count from Roadclass column.\n14. Class, Category are the synonyms for Road Category.\n15. Major Roads means, roads of Category SH\n16. district Roads means, Roads of category MDR\n17. When the question is not about a specific road, dont use Roadcode in where clause\n42. COLUMN CLARIFICATION: The 'Roads' table uses 'Road_id'. The 'RoadMaster' and 'LinkMaster' tables use 'RoadCode'. Never use RoadCode on the Roads table.\n44. TERMINOLOGY SYNONYMS: The user may use full names instead of abbreviations. State Highway means SH. Major District Road means MDR. Other District Road means ODR. Village Road means VR. Substitute the full names with these exact abbreviations when applying filters."
+        },
+        {
+            "category": "Pavement Condition & IRI",
+            "keywords": [
+                "iri",
+                "poor",
+                "condition",
+                "roughness",
+                "stretch"
+            ],
+            "rule_text": "30. When asked about IRI conditions (e.g. less than 4 IRI), you MUST query all three IRI columns using OR. Example: WHERE (LWPIRI < 4 OR RWPIRI < 4 OR LaneIRI < 4). Do not use IRIGrade.\n41. VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'."
+        },
+        {
+            "category": "Bridge Inventory & Condition",
+            "keywords": [
+                "bridge",
+                "min",
+                "maj",
+                "minor",
+                "major"
+            ],
+            "rule_text": "31. BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n39. TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n40. VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'."
+        },
+        {
+            "category": "Traffic & Stations",
+            "keywords": [
+                "traffic",
+                "station",
+                "tvc",
+                "vehicle"
+            ],
+            "rule_text": "32. To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n37. TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode"
+        },
+        {
+            "category": "Road Lengths & Dashboard Metrics",
+            "keywords": [
+                "length",
+                "total",
+                "count",
+                "network",
+                "dashboard",
+                "sh",
+                "mdr",
+                "vr"
+            ],
+            "rule_text": "33. ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n34. LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n35. ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster, and join LinkMaster lm with RoadMaster rm on lm.RoadCode = rm.RoadCode rm, and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n36. TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n43. DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules 32-41. When asked for detailed inventory or conditions about a specific road or district (e.g., length of a specific road, pavement condition, PCI), you MUST use the Roads, Road_Sections, and Pavement_Condition tables."
+        },
+        {
+            "category": "Safety & Black Spots",
+            "keywords": [
+                "black spot",
+                "accident",
+                "crash",
+                "safety"
+            ],
+            "rule_text": "38. BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage)."
+        }
+    ]
 }

@@ -745,7 +745,7 @@ async def get_current_file():
 
 
 # --- ADDED FOR ADMIN GLOBAL CONFIG API ---
-from history_manager import get_business_rules
+from history_manager import get_business_rules, filter_rules_by_keywords, get_business_skills, save_business_skills
 
 ADMIN_CONFIG_FILE = "admin_db_config.json"
 STATIC_MODEL_NAME = "qwen2.5-coder:7b"
@@ -919,9 +919,16 @@ class GenerateRuleRequest(BaseModel):
     question: str
     sql: str
 
+from typing import List, Optional
+
+class SkillModel(BaseModel):
+    category: str
+    keywords: List[str]
+    rule_text: str
+
 class SaveRulesRequest(BaseModel):
     database_identifier: str
-    rules_text: str
+    skills: List[SkillModel]
 
 @app.post("/admin/generate-rule")
 def admin_generate_rule(req: GenerateRuleRequest):
@@ -944,17 +951,9 @@ Correct SQL Query:
 
 @app.get("/admin/get-business-rules")
 def admin_get_business_rules(database_identifier: str):
-    import json
-    import os
-    rules_file = "business_rules.json"
-    if not os.path.exists(rules_file):
-        return {"rules_text": ""}
-        
     try:
-        with open(rules_file, "r", encoding="utf-8") as f:
-            all_rules = json.load(f)
-            
-        return {"rules_text": all_rules.get(database_identifier, "")}
+        skills = get_business_skills(database_identifier)
+        return {"skills": skills}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read rules: {e}")
 

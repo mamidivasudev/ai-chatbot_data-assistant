@@ -26,7 +26,7 @@ from mssql_schema_reader import (
 )
 from mssql_sql_generator import generate_tsql, generate_answer_summary, generate_rule_from_sql
 from mssql_executor import validate_tsql, execute_tsql
-from history_manager import init_db, save_chat, get_business_rules, save_business_rules, save_user_suggestion, get_user_suggestions, get_chat_history, clear_chat_history
+from history_manager import init_db, save_chat, get_business_skills, save_business_skills, filter_rules_by_keywords, save_user_suggestion, get_user_suggestions, get_chat_history, clear_chat_history
 
 # Import unified adapters
 from db_adapters import (
@@ -724,9 +724,7 @@ with st.sidebar:
                         env = st.session_state.get('db_environment', 'dev')
                         db_ident = f"{env}_{db_type}_{conn_params.get('database') or conn_params.get('db_path') or conn_params.get('host') or 'default'}"
                         st.session_state["db_identifier"] = db_ident
-                        st.session_state["business_rules"] = get_business_rules(db_ident)
-                        if "business_rules_widget" in st.session_state:
-                            del st.session_state["business_rules_widget"]
+                        st.session_state["business_rules"] = get_business_skills(db_ident)
                     except Exception as exc:
                         st.error(f"Connection failed: {exc}")
 
@@ -788,14 +786,15 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-    if st.button("Load Default", use_container_width=True, help="Load preset connection details"):
+    def load_defaults():
         st.session_state["db_server"] = "192.168.1.18"
         st.session_state["db_database"] = "Hims_Zrams"
         st.session_state["db_auth_mode"] = "SQL Server Authentication"
         st.session_state["db_username"] = "Sa"
         st.session_state["db_password"] = "Satra@123"
         st.session_state["db_model"] = "llama3:latest"
-        st.rerun()
+
+    st.button("Load Default", use_container_width=True, help="Load preset connection details", on_click=load_defaults)
 
 
 # ─────────────────────────────────────────────
@@ -942,50 +941,38 @@ with tab_query:
         st.stop()
 
     # Collapsible context panels
-    with st.expander("📋 Active schema", expanded=False):
-        with st.container(height=350):
-            try:
-                schema_text = get_db_schema_text(conn, db_type, selected_tables)
-                st.code(schema_text, language="json" if db_type in ["MongoDB", "Redis"] else "sql")
-            except Exception as exc:
-                st.error(f"Could not load schema: {exc}")
-                st.stop()
-
-    with st.expander("🧠 Business rules", expanded=False):
-        def on_rules_change():
-            st.session_state["business_rules"] = st.session_state["business_rules_widget"]
-            save_business_rules(st.session_state.get("db_identifier", ""), st.session_state["business_rules"])
-
-        def on_save_next():
-            import re
-            raw_text = st.session_state.get("business_rules_widget", "")
-            lines = raw_text.strip().split('\n') if raw_text.strip() else []
-            cleaned_lines = []
-            for line in lines:
-                cleaned_line = re.sub(r'^\d+\.\s*', '', line.strip())
-                if cleaned_line:
-                    cleaned_lines.append(cleaned_line)
-            numbered_text = ""
-            for i, c_line in enumerate(cleaned_lines):
-                numbered_text += f"{i+1}. {c_line}\n"
-            next_num = len(cleaned_lines) + 1
-            numbered_text += f"{next_num}. "
-            st.session_state["business_rules"] = numbered_text
-            st.session_state["business_rules_widget"] = numbered_text
-            save_business_rules(st.session_state.get("db_identifier", ""), numbered_text)
-
-        if "business_rules_widget" not in st.session_state:
-            st.session_state["business_rules_widget"] = st.session_state.get("business_rules", "")
-
-        st.text_area(
-            "Rules for the AI (e.g. 'Total length means EndCh - StartCh')",
-            height=350,
-            key="business_rules_widget",
-            on_change=on_rules_change,
-            label_visibility="collapsed",
-            placeholder="Add specific rules or formulas…",
-        )
-        st.button("💾 Save & Next", help="Save and number the next rule", on_click=on_save_next)
+    with st.expander("AI Skills (Dynamic Business Rules)", expanded=False):
+        st.caption("Add categories, trigger keywords, and rules. Separate keywords with commas. Empty keywords apply globally.")
+        skills = st.session_state.get("business_rules", [])
+        
+        # Convert to a format data_editor can use
+        df_data = []
+        for s in skills:
+            df_data.append({
+                "category": s.get("category", ""),
+                "keywords": ", ".join(s.get("keywords", [])) if isinstance(s.get("keywords"), list) else s.get("keywords", ""),
+                "rule_text": s.get("rule_text", "")
+            })
+        if not df_data:
+            df_data.append({"category": "", "keywords": "", "rule_text": ""})
+            
+        import pandas as pd
+        df = pd.DataFrame(df_data)
+        
+        edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="skills_editor", hide_index=True)
+        
+        if st.button("?? Save Skills"):
+            new_skills = []
+            for _, row in edited_df.iterrows():
+                cat = str(row.get("category", "")).strip()
+                r_text = str(row.get("rule_text", "")).strip()
+                if r_text:
+                    kws_raw = str(row.get("keywords", ""))
+                    kws = [k.strip() for k in kws_raw.split(",") if k.strip()]
+                    new_skills.append({"category": cat, "keywords": kws, "rule_text": r_text})
+            st.session_state["business_rules"] = new_skills
+            save_business_skills(st.session_state.get("db_identifier", ""), new_skills)
+            st.success("AI Skills saved successfully!")
 
     with st.expander("💡 Suggested questions", expanded=False):
         try:
@@ -1105,9 +1092,10 @@ with tab_query:
                 with st.spinner(f"Generating {query_lang_name}…"):
                     try:
                         schema_text = get_db_schema_text(conn, db_type, selected_tables)
+                        active_rules = filter_rules_by_keywords(question, st.session_state.get("db_identifier", ""))
                         sql = generate_db_query(
                             db_type, question, schema_text,
-                            business_rules=st.session_state.get("business_rules", ""),
+                            business_rules=active_rules,
                             model=selected_model
                         )
                     except Exception as exc:
