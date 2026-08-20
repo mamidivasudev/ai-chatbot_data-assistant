@@ -1,0 +1,14 @@
+{
+    "server": "192.168.1.18",
+    "database": "Hims_Zrams",
+    "username": "Sa",
+    "password": "Satra@123",
+    "auth_mode": "SQL Server Authentication",
+    "driver": "",
+    "tables": [
+        [
+            "dbo",
+            "Roads"
+        ]
+    ]
+}
