@@ -10,7 +10,7 @@ graph TD
     subgraph Frontend [Streamlit UI - mssql_app.py]
         UI_Chat[Chat Interface]
         UI_Sidebar[Sidebar: Environment, Credentials, Tables]
-        UI_Rules[Business Rules Editor]
+        UI_Rules[AI Skills & Rules Manager]
     end
 
     %% Backend Layer
@@ -62,7 +62,7 @@ graph TD
 
 ### A. The Frontend (Streamlit)
 * **File:** `mssql_app.py`
-* **Role:** The user interface. It provides an intuitive sidebar for selecting the **Environment** (`dev`, `qa`, `prod`), inputting credentials, and managing custom **Business Rules**. The main panel provides a chat interface to ask natural language questions.
+* **Role:** The user interface. It provides an intuitive sidebar for selecting the **Environment** (`dev`, `qa`, `prod`), inputting credentials, and managing **Dynamic AI Skills (Business Rules)**. The main panel provides a chat interface to ask natural language questions.
 * **Communication:** It makes standard HTTP POST/GET requests to the FastAPI backend.
 
 ### B. The Backend (FastAPI)
