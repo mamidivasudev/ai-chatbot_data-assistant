@@ -585,6 +585,10 @@ with st.sidebar:
     else:
         db_type = st.session_state["db_type"]
 
+    # Environment selection
+    st.markdown('<p class="sidebar-section-label">Environment</p>', unsafe_allow_html=True)
+    env = st.selectbox("Environment", ["dev", "qa", "prod"], key="db_environment", label_visibility="collapsed")
+    
     # Model selection
     st.markdown('<p class="sidebar-section-label">Model</p>', unsafe_allow_html=True)
     available_models = list_ollama_models()
@@ -720,7 +724,8 @@ with st.sidebar:
                         st.session_state["selected_tables"] = []
                         st.session_state.pop("table_multiselect", None)
                         st.session_state["chat_history"] = []
-                        db_ident = f"{db_type}_{conn_params.get('database') or conn_params.get('db_path') or conn_params.get('host') or 'default'}"
+                        env = st.session_state.get('db_environment', 'dev')
+                        db_ident = f"{env}_{db_type}_{conn_params.get('database') or conn_params.get('db_path') or conn_params.get('host') or 'default'}"
                         st.session_state["db_identifier"] = db_ident
                         st.session_state["business_rules"] = get_business_rules(db_ident)
                         if "business_rules_widget" in st.session_state:

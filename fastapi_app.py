@@ -129,6 +129,7 @@ def verify_token():
 # Request / Response models
 # ─────────────────────────────────────────────
 class ConnectRequest(BaseModel):
+    environment: str = "dev"
     server: str
     database: str
     auth_mode: str                    # "Windows Authentication" | "SQL Server Authentication"
@@ -138,10 +139,12 @@ class ConnectRequest(BaseModel):
 
 
 class SchemaRequest(BaseModel):
+    environment: str = "dev"
     session_id: str
     tables: list[str]
 
 class AskRequest(BaseModel):
+    environment: str = "dev"
     session_id: str
     tables: list[str]
     question: str
@@ -259,8 +262,14 @@ def connect(req: ConnectRequest, payload: dict = Depends(verify_token)):
         
         try:
             import json
+            existing_config = {}
+            if os.path.exists(ADMIN_CONFIG_FILE):
+                with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    try: existing_config = json.load(f)
+                    except: pass
+            existing_config[req.environment] = initial_config
             with open(ADMIN_CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(initial_config, f, indent=4)
+                json.dump(existing_config, f, indent=4)
         except Exception as e:
             logger.error(f"Failed to save initial admin config: {e}")
 
@@ -742,9 +751,11 @@ ADMIN_CONFIG_FILE = "admin_db_config.json"
 STATIC_MODEL_NAME = "qwen2.5-coder:7b"
 
 class AdminDbConfigRequest(BaseModel):
+    environment: str = "dev"
     tables: list[str]
 
 class GlobalQuestionRequest(BaseModel):
+    environment: str = "dev"
     question: str
 
 @app.post("/admin/save-db-config")
@@ -766,7 +777,9 @@ def save_admin_db_config(req: AdminDbConfigRequest):
         except Exception:
             raise HTTPException(status_code=400, detail=f"Invalid table format: {t}. Must be 'schema.table'")
 
-    config_data["tables"] = parsed_tables
+    if req.environment not in config_data:
+        config_data[req.environment] = {}
+    config_data[req.environment]["tables"] = parsed_tables
 
     try:
         with open(ADMIN_CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -777,25 +790,31 @@ def save_admin_db_config(req: AdminDbConfigRequest):
     return {"status": "success", "message": "Global configuration saved successfully."}
 
 @app.get("/admin/get-db-config")
-def get_admin_db_config():
+def get_admin_db_config(environment: str = "dev"):
     if not os.path.exists(ADMIN_CONFIG_FILE):
         return {"status": "not_configured", "config": None}
     try:
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            config = json.load(f)
+            full_config = json.load(f)
+            config = full_config.get(environment, None)
+            if not config:
+                return {"status": "not_configured", "config": None}
             config["password"] = "********"
             return {"status": "configured", "config": config}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read configuration: {e}")
 
 @app.get("/admin/check-db-status")
-def check_db_status():
+def check_db_status(environment: str = "dev"):
     if not os.path.exists(ADMIN_CONFIG_FILE):
         return {"is_configured": False, "is_connected": False, "message": "No database configuration found."}
         
     try:
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            config = json.load(f)
+            full_config = json.load(f)
+            config = full_config.get(environment, None)
+            if not config:
+                return {"is_configured": False, "is_connected": False, "message": f"No config for {environment}."}
             
         cipher = get_cipher()
         try:
@@ -828,7 +847,10 @@ def ask_global_db_query(request: GlobalQuestionRequest):
         
     try:
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            config = json.load(f)
+            full_config = json.load(f)
+            config = full_config.get(request.environment, None)
+            if not config:
+                raise HTTPException(status_code=400, detail=f"Database config not found for {request.environment}.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read admin config: {e}")
         
