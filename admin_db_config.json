@@ -1,34 +1,12 @@
 {
-    "Development": {
+    "Dev": {
         "server": "192.168.1.18",
         "database": "Hims_Zrams",
         "username": "Sa",
-        "password": "gAAAAABqhtiHFAPwQojxU6Bntp0isrp-1Fec8__1KxLAusubOGTHOanTaAjEMiCcovjtyd03SE3qEiAENUZS7Dyk8W2K7UOuCg==",
+        "password": "gAAAAABqiAaOPbzk091CkAxpgV9HV8OY3XZSR-PMrZTXRw6ycGJInPHkI5KUc8D1-QQtNa8oMgYLFjVkdFQnGc4ozwQ1e45CDQ==",
         "auth_mode": "SQL Server Authentication",
-        "driver": "",
+        "driver": null,
         "tables": [
-            [
-                "dbo",
-                "RoadMaster"
-            ],
-            [
-                "dbo",
-                "Roads"
-            ]
-        ]
-    },
-    "Qa": {
-        "server": "192.168.1.19",
-        "database": "Hims_Zrams",
-        "username": "Sa",
-        "password": "gAAAAABqhtmiX5MQ_5RDNh2ZC6Ja_g-jFI-HblzUYPiYylh_mo_DTJCjzlOPax_LzzOUWNlAqCfdotxnqTVzf1agPLm447EtRQ==",
-        "auth_mode": "SQL Server Authentication",
-        "driver": "",
-        "tables": [
-            [
-                "dbo",
-                "RoadMaster"
-            ],
             [
                 "dbo",
                 "Roads"

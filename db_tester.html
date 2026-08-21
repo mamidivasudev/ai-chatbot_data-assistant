@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database API Tester</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; background-color: #f0f2f5; color: #333; }
+        .section { background: white; margin-bottom: 25px; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #2c3e50; }
+        h3 { margin-top: 0; color: #34495e; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        label { font-weight: bold; font-size: 14px; color: #7f8c8d; display: block; margin-bottom: 5px; }
+        input[type="text"], input[type="password"], select { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #bdc3c7; border-radius: 5px; box-sizing: border-box; }
+        button { background-color: #3498db; color: white; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold; transition: background 0.3s; width: 100%; }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #95a5a6; cursor: not-allowed; }
+        .statusArea { font-weight: bold; margin-top: 15px; padding: 10px; border-radius: 5px; display: none; }
+        .success { background-color: #d5f5e3; color: #27ae60; }
+        .error { background-color: #fadbd8; color: #c0392b; }
+        .info { background-color: #d6eaf8; color: #2980b9; }
+        .tables-container { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; max-height: 150px; overflow-y: auto; padding: 10px; border: 1px solid #ecf0f1; border-radius: 5px; }
+        .table-checkbox { display: flex; align-items: center; gap: 5px; background: #ecf0f1; padding: 5px 10px; border-radius: 15px; font-size: 14px; }
+        #sqlOutput { font-family: monospace; background: #2c3e50; color: #f1c40f; padding: 15px; border-radius: 5px; white-space: pre-wrap; margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #34495e; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <h2>SQL Database API Tester</h2>
+
+    <!-- Connection Section -->
+    <div class="section" id="connectSection">
+        <h3>1. Connect to Database</h3>
+        <div class="grid-2">
+            <div>
+                <label>Environment Name (for saving later)</label>
+                <input type="text" id="envName" placeholder="e.g., default, staging, prod" value="default">
+            </div>
+            <div></div>
+            <div>
+                <label>Server</label>
+                <input type="text" id="server" placeholder="e.g., localhost\SQLEXPRESS" value="localhost\SQLEXPRESS">
+            </div>
+            <div>
+                <label>Database</label>
+                <input type="text" id="database" placeholder="e.g., my_database">
+            </div>
+            <div>
+                <label>Auth Mode</label>
+                <select id="authMode" onchange="toggleAuthFields()">
+                    <option value="Windows Authentication">Windows Authentication</option>
+                    <option value="SQL Server Authentication">SQL Server Authentication</option>
+                </select>
+            </div>
+            <div id="credentials" style="display: none;">
+                <div class="grid-2">
+                    <div>
+                        <label>Username</label>
+                        <input type="text" id="username" placeholder="sa">
+                    </div>
+                    <div>
+                        <label>Password</label>
+                        <input type="password" id="password" placeholder="***">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button id="loadDefaultBtn" onclick="loadDefaults()" style="background-color: #7f8c8d;">Load Default</button>
+            <button id="connectBtn" onclick="connectDB()">Connect to Database</button>
+        </div>
+        <div id="connectStatus" class="statusArea"></div>
+    </div>
+
+    <!-- Tables & Schema Section -->
+    <div class="section" id="tablesSection" style="display: none; opacity: 0.5; pointer-events: none;">
+        <h3>2. Select Tables & Save Config</h3>
+        <p style="font-size: 14px; color: #7f8c8d;">Select the tables the AI should know about, then optionally save this config for the environment.</p>
+        
+        <div style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
+            <input type="text" id="tableSearch" onkeyup="filterTables()" placeholder="🔍 Search tables..." style="flex: 1; margin: 0;">
+            <button onclick="selectAllTables()" style="background-color: #27ae60; width: auto; padding: 10px;">Select All</button>
+            <button onclick="unselectAllTables()" style="background-color: #e74c3c; width: auto; padding: 10px;">Unselect All</button>
+        </div>
+
+        <div class="tables-container" id="tablesList"></div>
+
+        <button onclick="saveDbConfig()" id="saveConfigBtn" style="background-color: #9b59b6; margin-top: 15px;">💾 Save Selected Tables as Environment Config</button>
+        <div id="saveConfigStatus" class="statusArea"></div>
+    </div>
+
+    <!-- Query Section -->
+    <div class="section" id="querySection">
+        <h3>3. Chat with Database (Fetch Answer API)</h3>
+        
+        <div style="background: #ecf0f1; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+            <label>Select Saved Environment Config</label>
+            <div style="display: flex; gap: 10px;">
+                <select id="savedEnvSelect" style="margin-bottom: 0; flex: 1;">
+                    <option value="">Loading...</option>
+                </select>
+                <button onclick="loadEnvironments()" style="width: auto; background-color: #7f8c8d;" title="Refresh list">🔄</button>
+            </div>
+        </div>
+
+        <label>Ask a Question (Natural Language)</label>
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="questionInput" placeholder="e.g., Show me the top 5 highest paid employees..." style="flex: 1; margin-bottom: 0;">
+            <button onclick="askDatabase()" id="askBtn" style="width: auto;">Generate & Run Query</button>
+        </div>
+        
+        <div id="queryStatus" class="statusArea"></div>
+
+        <div id="resultsArea" style="display: none; margin-top: 20px;">
+            <label>Generated SQL Query:</label>
+            <div id="sqlOutput"></div>
+            
+            <label>Database Results (<span id="rowCount">0</span> rows):</label>
+            <div style="overflow-x: auto;">
+                <table id="dataTable">
+                    <thead id="dataHead"></thead>
+                    <tbody id="dataBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = "";
+
+        // On Load
+        document.addEventListener("DOMContentLoaded", () => {
+            loadEnvironments();
+        });
+
+        function toggleAuthFields() {
+            const authMode = document.getElementById('authMode').value;
+            document.getElementById('credentials').style.display = authMode === 'SQL Server Authentication' ? 'block' : 'none';
+        }
+
+        function setStatus(elementId, message, type) {
+            const el = document.getElementById(elementId);
+            el.innerText = message;
+            el.className = 'statusArea ' + type;
+            el.style.display = 'block';
+        }
+
+        function loadDefaults() {
+            document.getElementById('server').value = "192.168.1.18";
+            document.getElementById('database').value = "Hims_Zrams";
+            document.getElementById('authMode').value = "SQL Server Authentication";
+            toggleAuthFields();
+            document.getElementById('username').value = "Sa";
+            document.getElementById('password').value = "Satra@123";
+            setStatus('connectStatus', "✅ Default details loaded!", "success");
+        }
+
+        async function connectDB() {
+            const btn = document.getElementById('connectBtn');
+            const envName = document.getElementById('envName').value || "default";
+            const server = document.getElementById('server').value;
+            const database = document.getElementById('database').value;
+            const authMode = document.getElementById('authMode').value;
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            if(!server || !database) {
+                setStatus('connectStatus', "Server and Database are required!", "error");
+                return;
+            }
+
+            btn.innerText = "Connecting...";
+            btn.disabled = true;
+            setStatus('connectStatus', "Establishing connection...", "info");
+
+            const payload = {
+                environment: envName,
+                server: server,
+                database: database,
+                auth_mode: authMode,
+                username: username || null,
+                password: password || null
+            };
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/connect`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-token' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    setStatus('connectStatus', `✅ Connected! Found ${result.table_count} tables.`, "success");
+                    
+                    const tablesList = document.getElementById('tablesList');
+                    tablesList.innerHTML = '';
+                    result.tables.forEach(table => {
+                        tablesList.innerHTML += `
+                            <label class="table-checkbox">
+                                <input type="checkbox" value="${table}" checked class="table-cb">
+                                ${table}
+                            </label>
+                        `;
+                    });
+
+                    document.getElementById('tablesSection').style.display = 'block';
+                    document.getElementById('tablesSection').style.opacity = '1';
+                    document.getElementById('tablesSection').style.pointerEvents = 'auto';
+                    
+                } else {
+                    setStatus('connectStatus', "❌ Error: " + (result.detail || JSON.stringify(result)), "error");
+                }
+            } catch (error) {
+                setStatus('connectStatus', "❌ Connection Error: " + error.message, "error");
+            } finally {
+                btn.innerText = "Connect to Database";
+                btn.disabled = false;
+            }
+        }
+
+        function filterTables() {
+            const input = document.getElementById("tableSearch").value.toLowerCase();
+            const labels = document.querySelectorAll('.table-checkbox');
+            labels.forEach(label => {
+                if (label.innerText.toLowerCase().includes(input)) {
+                    label.style.display = "flex";
+                } else {
+                    label.style.display = "none";
+                }
+            });
+        }
+
+        function selectAllTables() {
+            const checkboxes = document.querySelectorAll('.table-checkbox[style*="display: flex"] input[type="checkbox"], .table-checkbox:not([style*="display: none"]) input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = true);
+        }
+
+        function unselectAllTables() {
+            const checkboxes = document.querySelectorAll('.table-checkbox input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = false);
+        }
+
+        function getSelectedTables() {
+            const checkboxes = document.querySelectorAll('.table-cb:checked');
+            return Array.from(checkboxes).map(cb => cb.value);
+        }
+
+        async function saveDbConfig() {
+            const envName = document.getElementById('envName').value || "default";
+            const tables = getSelectedTables();
+            const btn = document.getElementById('saveConfigBtn');
+
+            if (tables.length === 0) {
+                setStatus('saveConfigStatus', "❌ Please select at least one table to save.", "error");
+                return;
+            }
+
+            btn.disabled = true;
+            setStatus('saveConfigStatus', `Saving config for environment '${envName}'...`, "info");
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/admin/save-db-config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-token' },
+                    body: JSON.stringify({ environment: envName, tables: tables })
+                });
+                
+                const result = await response.json();
+                if (response.ok) {
+                    setStatus('saveConfigStatus', `✅ Successfully saved config for '${envName}'!`, "success");
+                    loadEnvironments(); 
+                } else {
+                    setStatus('saveConfigStatus', "❌ Error: " + (result.detail || JSON.stringify(result)), "error");
+                }
+            } catch (error) {
+                setStatus('saveConfigStatus', "❌ Connection Error: " + error.message, "error");
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function loadEnvironments() {
+            const select = document.getElementById('savedEnvSelect');
+            select.innerHTML = '<option value="">Loading...</option>';
+            try {
+                const response = await fetch(`${API_BASE_URL}/admin/environments`);
+                const result = await response.json();
+                if (response.ok && result.environments) {
+                    select.innerHTML = '';
+                    if (result.environments.length === 0) {
+                        select.innerHTML = '<option value="">No environments saved yet</option>';
+                    } else {
+                        result.environments.forEach(env => {
+                            select.innerHTML += `<option value="${env}">${env}</option>`;
+                        });
+                    }
+                }
+            } catch (error) {
+                select.innerHTML = '<option value="">Error loading environments</option>';
+            }
+        }
+
+        async function askDatabase() {
+            const question = document.getElementById('questionInput').value;
+            const env = document.getElementById('savedEnvSelect').value;
+            
+            if (!question) { alert("Please ask a question!"); return; }
+            if (!env) { alert("Please select a saved environment from the dropdown above!"); return; }
+
+            const url = `${API_BASE_URL}/fetch-answer`;
+            const payload = {
+                environment: env,
+                question: question,
+                model: "llama3:latest"
+            };
+
+            const btn = document.getElementById('askBtn');
+            const status = document.getElementById('queryStatus');
+            const resultsArea = document.getElementById('resultsArea');
+            
+            btn.innerText = "Generating SQL...";
+            btn.disabled = true;
+            status.innerText = "🧠 AI is analyzing the schema and writing the SQL query...";
+            status.style.color = "#f39c12";
+            status.className = 'statusArea info';
+            status.style.display = 'block';
+            resultsArea.style.display = "none";
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-token' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    setStatus('queryStatus', "✅ Query executed successfully!", "success");
+                    
+                    document.getElementById('sqlOutput').innerText = result.sql || result.sql_query || "N/A";
+                    document.getElementById('rowCount').innerText = result.row_count || 0;
+                    
+                    const thead = document.getElementById('dataHead');
+                    const tbody = document.getElementById('dataBody');
+                    thead.innerHTML = '';
+                    tbody.innerHTML = '';
+                    
+                    if (result.columns && result.columns.length > 0) {
+                        const trHead = document.createElement('tr');
+                        result.columns.forEach(col => {
+                            const th = document.createElement('th');
+                            th.innerText = col;
+                            trHead.appendChild(th);
+                        });
+                        thead.appendChild(trHead);
+                        
+                        if (result.rows) {
+                            result.rows.forEach(row => {
+                                const tr = document.createElement('tr');
+                                row.forEach(cell => {
+                                    const td = document.createElement('td');
+                                    td.innerText = cell !== null ? cell : 'NULL';
+                                    tr.appendChild(td);
+                                });
+                                tbody.appendChild(tr);
+                            });
+                        }
+                        resultsArea.style.display = "block";
+                    } else {
+                        setStatus('queryStatus', "⚠️ Query ran, but returned no columns/data.", "info");
+                    }
+                } else {
+                    setStatus('queryStatus', "❌ Error: " + (result.detail || JSON.stringify(result)), "error");
+                }
+            } catch (error) {
+                setStatus('queryStatus', "❌ Connection Error: " + error.message, "error");
+            } finally {
+                btn.innerText = "Generate & Run Query";
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

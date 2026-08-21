@@ -467,6 +467,24 @@ def disconnect(
         "status": "disconnected"
     }
 
+
+@app.get("/rag-tester")
+async def serve_rag_tester():
+    from fastapi.responses import HTMLResponse
+    import os
+    ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rag_tester.html")
+    with open(ui_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@app.get("/db-tester")
+async def serve_db_tester():
+    from fastapi.responses import HTMLResponse
+    import os
+    ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db_tester.html")
+    with open(ui_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
 @app.post("/upload-file")
 async def v2_upload_file_endpoint(file: UploadFile = File(...)):
     import v2_rag_engine
@@ -566,7 +584,7 @@ async def v2_ask_your_query(
         system_prompt += "- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"This detail is currently not available in our system.\"\n"
         system_prompt += "- NEVER perform mathematical calculations or combinations.\n"
         system_prompt += "- Never use introductory phrases like \"According to the records\". Start directly with the answer.\n"
-        system_prompt += "- Do not explain your reasoning. Just output the final answer."
+        system_prompt += "- Provide a complete and comprehensive answer using all relevant details from the records (especially if it is a process with steps). Do not leave out important steps."
         
         if detected_lang:
             system_prompt += f"\n\nCRITICAL MANDATORY OVERRIDE: The USER QUESTION is in {detected_lang}. You MUST write your entire response natively in {detected_lang}. Do NOT reply in English. If you reply in English, you will fail."
@@ -656,7 +674,7 @@ async def v2_ask_your_query_stream(
         prompt += "CRITICAL OUTPUT CONSTRAINTS (YOU MUST OBEY THESE OR FAIL):\n"
         prompt += "- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"This detail is currently not available in our system.\"\n"
         prompt += "- NEVER perform mathematical calculations or combinations.\n"
-        prompt += "- Do not explain your reasoning. Just output the final answer."
+        prompt += "- Provide a complete and comprehensive answer using all relevant details from the records (especially if it is a process with steps). Do not leave out important steps."
         
         if detected_lang:
             prompt += f"\n\nCRITICAL MANDATORY OVERRIDE: The USER QUESTION is in {detected_lang}. You MUST write your entire response natively in {detected_lang}. Do NOT reply in English. If you reply in English, you will fail."
@@ -752,6 +770,19 @@ class AdminDbConfigRequest(BaseModel):
 class GlobalQuestionRequest(BaseModel):
     environment: str = "default"
     question: str
+
+
+@app.get("/admin/environments")
+def get_all_environments():
+    if not os.path.exists(ADMIN_CONFIG_FILE):
+        return {"environments": []}
+    try:
+        import json
+        with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return {"environments": list(data.keys())}
+    except Exception:
+        return {"environments": []}
 
 @app.post("/admin/save-db-config")
 def save_admin_db_config(req: AdminDbConfigRequest):
