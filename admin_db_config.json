@@ -1,0 +1,38 @@
+{
+    "Development": {
+        "server": "192.168.1.18",
+        "database": "Hims_Zrams",
+        "username": "Sa",
+        "password": "gAAAAABqhtiHFAPwQojxU6Bntp0isrp-1Fec8__1KxLAusubOGTHOanTaAjEMiCcovjtyd03SE3qEiAENUZS7Dyk8W2K7UOuCg==",
+        "auth_mode": "SQL Server Authentication",
+        "driver": "",
+        "tables": [
+            [
+                "dbo",
+                "RoadMaster"
+            ],
+            [
+                "dbo",
+                "Roads"
+            ]
+        ]
+    },
+    "Qa": {
+        "server": "192.168.1.19",
+        "database": "Hims_Zrams",
+        "username": "Sa",
+        "password": "gAAAAABqhtmiX5MQ_5RDNh2ZC6Ja_g-jFI-HblzUYPiYylh_mo_DTJCjzlOPax_LzzOUWNlAqCfdotxnqTVzf1agPLm447EtRQ==",
+        "auth_mode": "SQL Server Authentication",
+        "driver": "",
+        "tables": [
+            [
+                "dbo",
+                "RoadMaster"
+            ],
+            [
+                "dbo",
+                "Roads"
+            ]
+        ]
+    }
+}

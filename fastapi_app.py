@@ -51,6 +51,8 @@ from session_manager import (
     get_file_session_history,
     add_file_session_history
 )
+from file_reader import read_project
+from search_engine import search_files
 from cryptography.fernet import Fernet
 # ─────────────────────────────────────────────
 # Config
@@ -129,7 +131,7 @@ def verify_token():
 # Request / Response models
 # ─────────────────────────────────────────────
 class ConnectRequest(BaseModel):
-    environment: str = "dev"
+    environment: str = "default"
     server: str
     database: str
     auth_mode: str                    # "Windows Authentication" | "SQL Server Authentication"
@@ -139,12 +141,10 @@ class ConnectRequest(BaseModel):
 
 
 class SchemaRequest(BaseModel):
-    environment: str = "dev"
     session_id: str
     tables: list[str]
 
 class AskRequest(BaseModel):
-    environment: str = "dev"
     session_id: str
     tables: list[str]
     question: str
@@ -264,9 +264,11 @@ def connect(req: ConnectRequest, payload: dict = Depends(verify_token)):
             import json
             existing_config = {}
             if os.path.exists(ADMIN_CONFIG_FILE):
-                with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-                    try: existing_config = json.load(f)
-                    except: pass
+                try:
+                    with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as _f:
+                        existing_config = json.load(_f)
+                except Exception:
+                    pass
             existing_config[req.environment] = initial_config
             with open(ADMIN_CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(existing_config, f, indent=4)
@@ -467,6 +469,366 @@ def disconnect(
         "status": "disconnected"
     }
 
+@app.post("/ask-query", response_model=AskFilesResponse)
+def ask_files(req: AskFilesRequest, payload: dict = Depends(verify_token)):
+
+    if not req.question.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Question cannot be empty."
+        )
+
+    try:
+        # 1. Read files from the static directory
+        static_dir = r"\\SAT-HYD-W0007\Vasu\New folder\Database_reader_ai\files"
+        files_data = read_project(static_dir)
+        
+        if not files_data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No files found in {static_dir}"
+            )
+            
+        if req.filename:
+            files_data = [f for f in files_data if req.filename.lower() in f["filename"].lower()]
+            if not files_data:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"File matching '{req.filename}' not found."
+                )
+            
+        # 2. Search files
+        matched_files = search_files(req.question, files_data)
+        
+        # Fallback: If a specific filename was requested, use it even if keyword search matched 0 words (e.g. Hindi/Gujarati/Hinglish questions)
+        if not matched_files:
+            if req.filename and files_data:
+                matched_files = files_data
+            else:
+                return AskFilesResponse(
+                    question=req.question,
+                    answer="No relevant information found in the documents."
+                )
+            
+        # 3. Build prompt
+        prompt = (
+            "You are an AI assistant.\n"
+            "INSTRUCTION: Answer the user's question accurately. You may use the provided data to answer, and you may also use your general knowledge to answer questions.\n"
+            "IMPORTANT: Respond in the same language as the user's Question (e.g., if asked in Hindi, respond in Hindi).\n"
+            "DO NOT announce or write the name of the language in your response.\n"
+            "CRITICAL RULE: NEVER mention that you are reading a document, file, or context. Do not use words like 'document', 'PDF', 'provided text', 'this context', or 'information provided'. Answer directly as if you inherently know all the information.\n\n"
+        )
+        for file in matched_files:
+            prompt += f"FILE: {file['filename']}\n"
+            prompt += file["content"][:80000] + "\n\n"
+        prompt += f"Question:\n{req.question}"
+        
+        # 4. Ask Ollama
+        if req.model:
+            answer = ask_ollama(prompt, model=req.model)
+        else:
+            answer = ask_ollama(prompt)
+        
+        return AskFilesResponse(
+            question=req.question,
+            answer=answer
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Error processing ask-files request: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/upload-file-ask-query", response_model=AskFilesResponse)
+async def upload_ask_query(
+    question: str = Form(...),
+    model: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    payload: dict = Depends(verify_token)
+):
+    if not question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+        
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_file_path = os.path.join(temp_dir, file.filename)
+            with open(temp_file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+                
+            files_data = read_project(temp_dir)
+            
+            if not files_data:
+                raise HTTPException(status_code=400, detail="Could not read the uploaded file.")
+                
+            matched_files = search_files(question, files_data)
+            
+            if not matched_files:
+                matched_files = files_data
+                
+            prompt = MULTILINGUAL_PROMPT_TEMPLATE
+            for f in matched_files:
+                prompt += f"FACTS:\n"
+                prompt += f["content"][:80000] + "\n\n"
+            prompt += f"Question:\n{question}"
+            
+            if model:
+                answer = ask_ollama(prompt, model=model)
+            else:
+                answer = ask_ollama(prompt)
+                
+            return AskFilesResponse(
+                question=question,
+                answer=answer
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Error processing upload_ask_query request: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/v2/is-file-present")
+async def is_file_present():
+    upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_file")
+    if not os.path.exists(upload_dir):
+        return {"status": False, "file name": None}
+    files = [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]
+    if len(files) > 0:
+        return {"status": True, "file name": files[0]}
+    return {"status": False, "file name": None}
+
+@app.post("/v2/upload-file")
+async def upload_file_endpoint(file: UploadFile = File(...)):
+    upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_file")
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    for f in os.listdir(upload_dir):
+        file_path = os.path.join(upload_dir, f)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+            
+    dest_path = os.path.join(upload_dir, file.filename)
+    with open(dest_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    # [V2 INJECTION] Also ingest for V2 RAG in the background to keep databases synced
+    try:
+        import v2_rag_engine
+        os.makedirs(v2_rag_engine.V2_UPLOAD_DIR, exist_ok=True)
+        v2_dest_path = os.path.join(v2_rag_engine.V2_UPLOAD_DIR, file.filename)
+        shutil.copy2(dest_path, v2_dest_path)
+        v2_rag_engine.ingest_file_v2(v2_dest_path, file.filename)
+    except Exception as e:
+        logger.error(f"V2 Ingest side-effect failed: {str(e)}")
+        
+    return {"message": "File uploaded successfully", "filename": file.filename}
+
+@app.post("/v2/ask-your-query", response_model=AskFilesResponse)
+async def ask_your_query(
+    question: str = Form(...),
+    model: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
+    payload: dict = Depends(verify_token)
+):
+    if not question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+        
+    try:
+        import uuid
+        if not session_id or not session_id.strip():
+            session_id = str(uuid.uuid4())
+
+        upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_file")
+        if not os.path.exists(upload_dir) or not [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]:
+            raise HTTPException(status_code=400, detail="No file found in uploaded_file folder.")
+            
+        files_data = read_project(upload_dir)
+        
+        if not files_data:
+            raise HTTPException(status_code=400, detail="Could not read the uploaded file.")
+            
+        matched_files = search_files(question, files_data)
+
+        # ── Relevance Guard ──────────────────────────────────────────────
+        # If search_files returned nothing, it means NO relevant content
+        # was found in the document for this question.
+        # Do NOT fall back to full document — return "not available" directly
+        # without calling the LLM, to prevent hallucination.
+        if not matched_files:
+            import uuid
+            return AskFilesResponse(
+                session_id=session_id,
+                question=question,
+                answer="This detail is currently not available in our system."
+            )
+
+        # 1. Identity & Source Protection for Old API
+        question_lower = question.lower()
+        identity_triggers = ["who are you", "what are you", "where do you get", "source of", "source for", "your source", "how do you know", "where are you getting", "how u getting", "how are you getting", "getting information", "from which", "from where", "which document"]
+        if any(trigger in question_lower for trigger in identity_triggers):
+            import uuid
+            return AskFilesResponse(
+                session_id=session_id or str(uuid.uuid4()),
+                question=question,
+                answer="I am the official AI Assistant for the Rajasthan Public Works Department (PWD). All information I provide is sourced natively from our secure internal system database."
+            )
+
+        history = get_file_session_history(session_id)
+            
+        prompt = (
+            "You are an AI assistant.\n"
+            "INSTRUCTION: Answer the user's question accurately. You may use the provided data to answer, and you may also use your general knowledge to answer questions.\n"
+            "IMPORTANT: Respond in the same language as the user's Question (e.g., if asked in Hindi, respond in Hindi).\n"
+            "DO NOT announce or write the name of the language in your response.\n"
+            "CRITICAL RULE: NEVER mention that you are reading a document, file, or context. Do not use words like 'document', 'PDF', 'provided text', 'this context', or 'information provided'. Answer directly as if you inherently know all the information.\n\n"
+        )
+        for f in matched_files:
+            prompt += f"FACTS:\n"
+            prompt += f["content"][:80000] + "\n\n"
+
+        if history:
+            prompt += "Prior Messages:\n"
+            for item in history:
+                prompt += f"User Question: {item['question']}\nAI Answer: {item['answer']}\n\n"
+
+        prompt += f"Current Question:\n{question}"
+        
+        if model:
+            answer = ask_ollama(prompt, model=model)
+        else:
+            answer = ask_ollama(prompt)
+
+        add_file_session_history(session_id, question, answer)
+            
+        return AskFilesResponse(
+            session_id=session_id,
+            question=question,
+            answer=answer
+        )
+            
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Error processing ask-your-query request: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/v2/ask-your-query-stream")
+async def ask_your_query_stream_endpoint(
+    request: Request,
+    question: str = Form(...),
+    model: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
+    payload: dict = Depends(verify_token)
+):
+    if not question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+        
+    try:
+        import uuid
+        if not session_id or not session_id.strip():
+            session_id = str(uuid.uuid4())
+
+        upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_file")
+        if not os.path.exists(upload_dir) or not [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]:
+            raise HTTPException(status_code=400, detail="No file found in uploaded_file folder.")
+            
+        files_data = read_project(upload_dir)
+        
+        if not files_data:
+            raise HTTPException(status_code=400, detail="Could not read the uploaded file.")
+            
+        matched_files = search_files(question, files_data)
+
+        # ── Relevance Guard ──────────────────────────────────────────────
+        # If search_files returned nothing, it means NO relevant content
+        # was found in the document for this question.
+        # Do NOT fall back to full document — return "not available" directly
+        # without calling the LLM, to prevent hallucination.
+        if not matched_files:
+            async def not_available_generator():
+                yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
+                yield f"event: delta\ndata: {json.dumps({'delta': 'This detail is currently not available in our system.'})}\n\n"
+            return StreamingResponse(not_available_generator(), media_type="text/event-stream")
+
+        # 1. Identity & Source Protection for Old API Stream
+        question_lower = question.lower()
+        identity_triggers = ["who are you", "what are you", "where do you get", "source of", "source for", "your source", "how do you know", "where are you getting", "how u getting", "how are you getting", "getting information", "from which", "from where", "which document"]
+        if any(trigger in question_lower for trigger in identity_triggers):
+            async def identity_generator():
+                import uuid
+                session = session_id or str(uuid.uuid4())
+                yield f"event: session\ndata: {json.dumps({'session_id': session})}\n\n"
+                yield f"event: delta\ndata: {json.dumps({'text': 'I am the official AI Assistant for the Rajasthan Public Works Department (PWD). All information I provide is sourced natively from our secure internal system database.'})}\n\n"
+                yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
+            return StreamingResponse(identity_generator(), media_type="text/event-stream")
+
+        history = get_file_session_history(session_id)
+            
+        prompt = (
+            "You are an AI assistant.\n"
+            "INSTRUCTION: Answer the user's question accurately. You may use the provided data to answer, and you may also use your general knowledge to answer questions.\n"
+            "IMPORTANT: Respond in the same language as the user's Question (e.g., if asked in Hindi, respond in Hindi).\n"
+            "DO NOT announce or write the name of the language in your response.\n"
+            "CRITICAL RULE: NEVER mention that you are reading a document, file, or context. Do not use words like 'document', 'PDF', 'provided text', 'this context', or 'information provided'. Answer directly as if you inherently know all the information.\n\n"
+        )
+        for f in matched_files:
+            prompt += f"FACTS:\n"
+            prompt += f["content"][:80000] + "\n\n"
+
+        if history:
+            prompt += "Prior Messages:\n"
+            for item in history:
+                prompt += f"User Question: {item['question']}\nAI Answer: {item['answer']}\n\n"
+
+        prompt += f"Current Question:\n{question}"
+        
+        async def event_generator():
+            try:
+                # 1. Yield session ID
+                yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
+                
+                full_answer = ""
+                # 2. Yield chunks
+                stream = ask_ollama_stream(prompt, model=model) if model else ask_ollama_stream(prompt)
+                async for chunk in stream:
+                    if await request.is_disconnected():
+                        logger.warning("Client disconnected during stream. Stopping generation.")
+                        break
+                    
+                    full_answer += chunk
+                    yield f"event: delta\ndata: {json.dumps({'text': chunk})}\n\n"
+                    
+                # 3. Add to history
+                if not await request.is_disconnected():
+                    add_file_session_history(session_id, question, full_answer)
+                    
+                    # 4. Yield done
+                    yield f"event: done\ndata: {json.dumps({'session_id': session_id})}\n\n"
+                    
+            except Exception as e:
+                logger.error("Error during streaming generation: %s", e)
+                yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream; charset=utf-8",
+            headers={
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Error setting up ask-your-query-stream request: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ==============================================================================
+# V2 ADVANCED RAG ENDPOINTS (ChromaDB + Cross-Encoder)
 # These run side-by-side without disturbing V1 functionality
 # ==============================================================================
 
@@ -732,6 +1094,7 @@ async def v2_ask_your_query_stream(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/is-file-present")
+@app.get("/v1/is-file-present")
 async def get_current_file():
     """Returns the list of files currently loaded in the V2 system."""
     import v2_rag_engine
@@ -743,19 +1106,30 @@ async def get_current_file():
         return {"status": True, "file name": files[0]}
     return {"status": False, "file name": None}
 
+@app.get("/v2/chat")
+async def serve_v2_ui():
+    """Serves the Voice-Enabled UI for V2 RAG."""
+    from fastapi.responses import HTMLResponse
+    import os
+    ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "v2_ui.html")
+    if not os.path.exists(ui_path):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="UI file not found.")
+    with open(ui_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
 
 # --- ADDED FOR ADMIN GLOBAL CONFIG API ---
-from history_manager import get_business_rules, filter_rules_by_keywords, get_business_skills, save_business_skills
-
+from history_manager import get_business_rules, save_business_rules
 ADMIN_CONFIG_FILE = "admin_db_config.json"
 STATIC_MODEL_NAME = "qwen2.5-coder:7b"
 
 class AdminDbConfigRequest(BaseModel):
-    environment: str = "dev"
+    environment: str = "default"
     tables: list[str]
 
 class GlobalQuestionRequest(BaseModel):
-    environment: str = "dev"
+    environment: str = "default"
     question: str
 
 @app.post("/admin/save-db-config")
@@ -769,6 +1143,9 @@ def save_admin_db_config(req: AdminDbConfigRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read existing configuration: {e}")
 
+    if req.environment not in config_data:
+        raise HTTPException(status_code=400, detail=f"Environment '{req.environment}' not found. Please connect first.")
+
     parsed_tables = []
     for t in req.tables:
         try:
@@ -777,8 +1154,6 @@ def save_admin_db_config(req: AdminDbConfigRequest):
         except Exception:
             raise HTTPException(status_code=400, detail=f"Invalid table format: {t}. Must be 'schema.table'")
 
-    if req.environment not in config_data:
-        config_data[req.environment] = {}
     config_data[req.environment]["tables"] = parsed_tables
 
     try:
@@ -790,13 +1165,13 @@ def save_admin_db_config(req: AdminDbConfigRequest):
     return {"status": "success", "message": "Global configuration saved successfully."}
 
 @app.get("/admin/get-db-config")
-def get_admin_db_config(environment: str = "dev"):
+def get_admin_db_config(environment: str = "default"):
     if not os.path.exists(ADMIN_CONFIG_FILE):
         return {"status": "not_configured", "config": None}
     try:
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            full_config = json.load(f)
-            config = full_config.get(environment, None)
+            config_data = json.load(f)
+            config = config_data.get(environment)
             if not config:
                 return {"status": "not_configured", "config": None}
             config["password"] = "********"
@@ -805,16 +1180,16 @@ def get_admin_db_config(environment: str = "dev"):
         raise HTTPException(status_code=500, detail=f"Failed to read configuration: {e}")
 
 @app.get("/admin/check-db-status")
-def check_db_status(environment: str = "dev"):
+def check_db_status(environment: str = "default"):
     if not os.path.exists(ADMIN_CONFIG_FILE):
         return {"is_configured": False, "is_connected": False, "message": "No database configuration found."}
         
     try:
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            full_config = json.load(f)
-            config = full_config.get(environment, None)
+            config_data = json.load(f)
+            config = config_data.get(environment)
             if not config:
-                return {"is_configured": False, "is_connected": False, "message": f"No config for {environment}."}
+                return {"is_configured": False, "is_connected": False, "message": f"Environment '{environment}' not configured."}
             
         cipher = get_cipher()
         try:
@@ -847,10 +1222,12 @@ def ask_global_db_query(request: GlobalQuestionRequest):
         
     try:
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            full_config = json.load(f)
-            config = full_config.get(request.environment, None)
+            config_data = json.load(f)
+            config = config_data.get(request.environment)
             if not config:
-                raise HTTPException(status_code=400, detail=f"Database config not found for {request.environment}.")
+                raise HTTPException(status_code=400, detail=f"Environment '{request.environment}' not found.")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read admin config: {e}")
         
@@ -876,8 +1253,11 @@ def ask_global_db_query(request: GlobalQuestionRequest):
         tables_tuple = [tuple(t) for t in config["tables"]]
         schema_text = get_selected_schema_text(conn, tables_tuple)
         
-        db_identifier = f"MS SQL_{config['database']}"
-        business_rules = get_business_rules(db_identifier)
+        db_identifier_env = f"{request.environment}_MS SQL_{config['database']}"
+        db_identifier_generic = f"MS SQL_{config['database']}"
+        business_rules = get_business_rules(db_identifier_env)
+        if not business_rules:
+            business_rules = get_business_rules(db_identifier_generic)
         
         logger.info("Generating SQL...")
         sql_query = generate_tsql(question, schema_text, business_rules, model=STATIC_MODEL_NAME)
@@ -919,23 +1299,27 @@ class GenerateRuleRequest(BaseModel):
     question: str
     sql: str
 
-from typing import List, Optional
-
-class SkillModel(BaseModel):
-    category: str
-    keywords: List[str]
-    rule_text: str
-
 class SaveRulesRequest(BaseModel):
-    database_identifier: str
-    skills: List[SkillModel]
+    rules_text: str
+    keywords: list[str] = ["*"]
+    skill_name: str = "Custom Rule"
 
 @app.post("/admin/generate-rule")
 def admin_generate_rule(req: GenerateRuleRequest):
     prompt = f"""You are a database business logic expert. 
 Given an Example Question and the Correct SQL Query that answers it, extract the underlying business rule or logic into a single, concise English sentence.
-For example, if the SQL uses "WHERE AADT > 10000", the rule might be "Busiest roads means AADT > 10000."
-Do NOT explain the SQL. Return ONLY the rule itself.
+
+You must return ONLY a valid JSON object with EXACTLY these three keys:
+1. "generated_rule": The extracted business rule in plain English.
+2. "skill_name": A short, 2-4 word title for this rule.
+3. "keywords": A list of 3-5 important words from the question that should trigger this rule.
+
+Example JSON output:
+{{
+  "generated_rule": "Busiest roads means AADT > 10000.",
+  "skill_name": "Traffic Rules",
+  "keywords": ["busiest", "traffic", "heavy"]
+}}
 
 Example Question:
 {req.question}
@@ -944,16 +1328,38 @@ Correct SQL Query:
 {req.sql}
 """
     try:
-        rule = ask_ollama(prompt, model=STATIC_MODEL_NAME).strip()
-        return {"generated_rule": rule}
+        response_text = ask_ollama(prompt, model=STATIC_MODEL_NAME).strip()
+        
+        # In case the LLM wraps it in markdown code blocks
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+            
+        import json
+        result = json.loads(response_text.strip())
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/get-business-rules")
-def admin_get_business_rules(database_identifier: str):
+def admin_get_business_rules(database_identifier: str, environment: str = "default"):
+    import json
+    import os
+    rules_file = "skills.json"
+    if not os.path.exists(rules_file):
+        return {"rules_text": ""}
+        
     try:
-        skills = get_business_skills(database_identifier)
-        return {"skills": skills}
+        with open(rules_file, "r", encoding="utf-8") as f:
+            all_rules = json.load(f)
+            
+        # Combine all global skills into one string for backward compatibility with frontend
+        registry = all_rules.get("global", [])
+        rules = "\n".join([s.get("instruction", "") for s in registry])
+        return {"rules_text": rules}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read rules: {e}")
 
@@ -961,7 +1367,7 @@ def admin_get_business_rules(database_identifier: str):
 def admin_save_business_rules(req: SaveRulesRequest):
     import json
     import os
-    rules_file = "business_rules.json"
+    rules_file = "skills.json"
     all_rules = {}
     
     if os.path.exists(rules_file):
@@ -969,9 +1375,20 @@ def admin_save_business_rules(req: SaveRulesRequest):
             with open(rules_file, "r", encoding="utf-8") as f:
                 all_rules = json.load(f)
         except Exception:
-            pass # File might be corrupted, we'll overwrite/fix
+            pass
             
-    all_rules[req.database_identifier] = req.rules_text
+    if "global" not in all_rules:
+        all_rules["global"] = []
+        
+    # Append as a new skill object
+    import uuid
+    new_skill = {
+        "id": str(uuid.uuid4())[:8],
+        "name": req.skill_name,
+        "keywords": req.keywords,
+        "instruction": req.rules_text
+    }
+    all_rules["global"].append(new_skill)
     
     try:
         with open(rules_file, "w", encoding="utf-8") as f:
@@ -981,14 +1398,17 @@ def admin_save_business_rules(req: SaveRulesRequest):
         raise HTTPException(status_code=500, detail=f"Failed to save rules: {e}")
 
 @app.get("/admin/get-all-tables")
-def admin_get_all_tables():
+def admin_get_all_tables(environment: str = "default"):
     if not os.path.exists(ADMIN_CONFIG_FILE):
         raise HTTPException(status_code=400, detail="Database is not configured.")
         
     try:
         import json
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            config = json.load(f)
+            config_data = json.load(f)
+            config = config_data.get(environment)
+            if not config:
+                raise HTTPException(status_code=400, detail=f"Environment '{environment}' not found.")
             
         cipher = get_cipher()
         try:
@@ -1013,4 +1433,3 @@ def admin_get_all_tables():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch tables: {e}")
-

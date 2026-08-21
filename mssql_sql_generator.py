@@ -1,9 +1,10 @@
+from skills import load_skills
 import re
 from ollama_client import ask_ollama
 
 
 def generate_tsql(question, schema_text, business_rules="", model=None):
-    rules_text = f"\nCustom Business Rules:\n{business_rules}\n" if business_rules.strip() else ""
+    rules_text = load_skills(question)
     prompt = f"""You are a MS SQL AI Assistant Server (T-SQL) expert.
 
 Database Schema:

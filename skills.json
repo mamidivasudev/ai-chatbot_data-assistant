@@ -1,0 +1,88 @@
+{
+    "global": [
+        {
+            "id": "core_sql_syntax",
+            "name": "Core SQL Syntax & Joins",
+            "keywords": [
+                "*"
+            ],
+            "instruction": "## SKILL ACTIVE: Core SQL Syntax\n- STRICT SQL SYNTAX: NEVER use more than one 'FROM' clause. All tables MUST be connected using 'INNER JOIN' or 'LEFT JOIN' immediately after the first FROM clause and BEFORE the WHERE clause.\n- LOGICAL GROUPING: Whenever you use 'OR' in a WHERE clause, you MUST wrap the OR conditions in parentheses.\n- ALIAS STRICTNESS: ALWAYS strictly use the exact alias defined in the FROM or JOIN clause. Never invent an alias. Use descriptive aliases.\n- Generate only valid Microsoft SQL Server (T-SQL). Generate SELECT statements only (no INSERT/UPDATE/DELETE).\n- Return only the columns required by the user. Use TOP only when explicitly requested. Never use SELECT *.\n- Always use literal values. Never generate SQL parameters such as @District or @Road.\n- Whenever filtering by District, Road or Section, use exact values. (e.g. WHERE r.District='Jhalawar')."
+        },
+        {
+            "id": "road_inventory",
+            "name": "Road Inventory Details",
+            "keywords": [
+                "road",
+                "length",
+                "district",
+                "section",
+                "sh",
+                "nh",
+                "mdr",
+                "odr",
+                "vr"
+            ],
+            "instruction": "## SKILL ACTIVE: Road Inventory\n- MANDATORY JOINS: When querying Road_Sections: ALWAYS INNER JOIN Roads ON Road_Sections.Road_id = Roads.Road_id.\n- TERMINOLOGY SYNONYMS: State Highway = SH, Major District Road = MDR, Other District Road = ODR, Village Road = VR. Substitute the full names with these exact abbreviations when applying filters.\n- ROAD INVENTORY DEFINITIONS: 'State Highway' = Road_Class='SH' | 'National Highway' = Road_Class='NH' | 'MDR' = Road_Class='MDR'.\n- Pavement Types: Use LIKE '%flexible pavement%' or LIKE '%Rigid pavement%'."
+        },
+        {
+            "id": "pavement_condition",
+            "name": "Pavement & IRI Condition",
+            "keywords": [
+                "iri",
+                "condition",
+                "pci",
+                "rutting",
+                "cracking",
+                "pothole",
+                "edgebreak",
+                "poor",
+                "fair",
+                "good",
+                "roughness"
+            ],
+            "instruction": "## SKILL ACTIVE: Pavement & IRI Condition\n- For IRI, always use the column named IRI. When asked about IRI conditions (e.g. less than 4 IRI), you MUST query all three IRI columns using OR. Example: WHERE (LWPIRI < 4 OR RWPIRI < 4 OR LaneIRI < 4). Do not use IRIGrade.\n- MANDATORY JOINS: When querying Pavement_Condition: ALWAYS INNER JOIN Road_Sections ON Pavement_Condition.Section_id = Road_Sections.Section_id AND INNER JOIN Roads ON Pavement_Condition.Road_id = Roads.Road_id.\n- Use CAST(AVG(metric) AS DECIMAL(10,2)) when averaging condition metrics.\n- CONDITION CLASSIFICATIONS (Use CASE Statements): PCI Condition: <=1 'Very Poor', >1 AND <=2 'Poor', >2 AND <=3 'Fair', >3 AND <=4 'Good', >4 'Very Good'. \n- Cracking / Pothole / EdgeBreak Condition: <=0 'Very Good', >0.1 AND <=10 'Good', >10.1 AND <=30 'Fair', >30.1 AND <=60 'Poor', >60.1 AND <=90 'Very Poor'.\n- CONDITION LOOKUP TABLES: For IRI Condition: LEFT JOIN LKPTRISRgh ON IRI >= MinIRI AND IRI <= MaxIRI (Return Catg). 'High roughness' means Grade=4. For Rutting: LEFT JOIN LKPTRISRutSev ON Rutting_mm >= Min AND Rutting_mm < Max (Return Name).\n- VERY POOR STRETCHES: To calculate Very Poor Stretches length, sum (r.EndCh-r.StartCh)/1000.00 from RISRghSumm r WHERE IRIGrade='Poor'."
+        },
+        {
+            "id": "traffic_data",
+            "name": "Traffic Analysis",
+            "keywords": [
+                "traffic",
+                "busiest",
+                "heavy",
+                "moderate",
+                "aadt",
+                "trucks",
+                "tvc",
+                "stations",
+                "growth"
+            ],
+            "instruction": "## SKILL ACTIVE: Traffic Analysis\n- MANDATORY JOINS: When querying Traffic_Data: ALWAYS INNER JOIN Road_Sections ON Traffic_Data.section_id = Road_Sections.Section_id INNER JOIN Roads ON Road_Sections.Road_id = Roads.Road_id.\n- TRAFFIC DATA LOGIC: 'Busiest' or 'Heavy' traffic means AADT > 10000 or TrfCatg=6. 'Moderate' traffic means TrfCatg=3. \n- 'Total Trucks' = TwoAxle + ThrAxle + MultiAxle. \n- 'Traffic Growth Percentage' = (SUM(AADT) - LAG(SUM(AADT)) OVER (PARTITION BY Road_id ORDER BY survey_year)) * 100.0 / NULLIF(LAG(SUM(AADT)) OVER (PARTITION BY Road_id ORDER BY survey_year),0).\n- To calculate the total number of traffic stations, use SELECT count(*) FROM TISTrfMaster. Do not apply any filters on CountType.\n- TVC MANDATORY RULE: For TVC, you MUST use exactly this query: SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm on tc.StnCode = tm.StnCode"
+        },
+        {
+            "id": "bridges_structures",
+            "name": "Bridges & Structures",
+            "keywords": [
+                "bridge",
+                "minor",
+                "major",
+                "culvert",
+                "bci",
+                "bcirtng"
+            ],
+            "instruction": "## SKILL ACTIVE: Bridges & Structures\n- BRIDGE TYPE DEFINITIONS: When asked for minor and major bridges, use 'MIN' and 'MAJ' for the BridgeType column (e.g., WHERE BridgeType = 'MIN' instead of BridgeType = 'Minor').\n- TOTAL BRIDGES: To count Total Bridges, count BridgeCode from BISBrdgLst.\n- VERY POOR BRIDGES: To count Very Poor Bridges, count DISTINCT bl.BridgeCode from BISBrdgLst bl inner join oBISBCI bc on bc.BridgeCode=bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'."
+        },
+        {
+            "id": "network_dashboard",
+            "name": "Network Dashboard & Aggregate Metrics",
+            "keywords": [
+                "total network",
+                "dashboard",
+                "black spot",
+                "accident",
+                "total link",
+                "total length"
+            ],
+            "instruction": "## SKILL ACTIVE: Network Dashboard\n- DASHBOARD VS INVENTORY OVERRIDE: When asked for aggregate Dashboard metrics (e.g., Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations), you MUST use LinkMaster and the rules below. When asked for detailed inventory or conditions about a specific road or district, you MUST use the Roads, Road_Sections, and Pavement_Condition tables.\n- ROAD COUNTS: To count SH, MDR, ODR, or VR roads, count DISTINCT RoadCode from LinkMaster lm where RoadCode LIKE 'SH%', 'MDR%', 'ODR%', or 'VR%' respectively.\n- LINK COUNT: To count total links, count DISTINCT linkcode from LinkMaster lm inner join SysAllLocs on SysAllLocs.Level5Code = LinkMaster.GeoID.\n- ROAD LENGTH: To calculate length of SH, MDR, ODR, or VR roads (in km), join LinkMaster with RoadMaster (lm.RoadCode = rm.RoadCode), and sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm. You MUST include WHERE rm.RoadClass='SH' (or MDR/ODR/VR) AND lm.Direction = 'I'.\n- TOTAL NETWORK LENGTH: To calculate Total Network Length in km, sum (lm.EndChainage - lm.StartChainage)/1000.0 from LinkMaster lm.\n- BLACK SPOTS: To count Black spots, count records from BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND (al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage)."
+        }
+    ]
+}
