@@ -40,12 +40,13 @@
     <div class="section">
         <h3>2. Ask a Question</h3>
         <div class="flex-row">
-            <input type="text" id="questionInput" placeholder="Type your question here or use voice...">
+            <input type="text" id="questionInput" placeholder="Type your question here or use voice..." onkeypress="if(event.key === 'Enter') askQuery()">
+            <button onclick="document.getElementById('questionInput').value=''" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #7f8c8d; padding: 0 10px;" title="Clear">✖</button>
             <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()" title="Click to speak">🎤</button>
         </div>
         <div style="margin-top: 15px; display: flex; gap: 10px;">
-            <button onclick="askQueryStream()" style="background-color: #9b59b6;">Ask (Streaming)</button>
-            <button onclick="askQuery()" style="background-color: #f39c12;">Ask (Normal)</button>
+            
+            <button onclick="askQuery()" style="background-color: #f39c12;">Ask</button>
         </div>
     </div>
 
