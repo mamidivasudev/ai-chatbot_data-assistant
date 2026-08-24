@@ -749,7 +749,7 @@ with st.sidebar:
     elif mode == "File Reader AI Assistant":
         db_type = st.session_state["db_type"]
         st.markdown('<p class="sidebar-section-label">Upload Document</p>', unsafe_allow_html=True)
-        uploaded_file = st.file_uploader("Upload .docx or .txt file", type=["docx", "txt"], label_visibility="collapsed")
+        uploaded_file = st.file_uploader("Upload document or spreadsheet", type=["docx", "txt", "pdf", "csv", "xlsx", "xls"], label_visibility="collapsed")
         
         # Model selection
         st.markdown('<p class="sidebar-section-label">Model</p>', unsafe_allow_html=True)
@@ -805,7 +805,7 @@ if mode == "File Reader AI Assistant":
         st.markdown("""
         <div class="welcome-card">
             <h3>Getting started</h3>
-            <div class="step-row"><div class="step-num">1</div><div class="step-text">Upload a .docx or .txt file in the sidebar</div></div>
+            <div class="step-row"><div class="step-num">1</div><div class="step-text">Upload a document, PDF, or spreadsheet in the sidebar</div></div>
             <div class="step-row"><div class="step-num">2</div><div class="step-text">Click <strong>Process File</strong> to analyze it</div></div>
             <div class="step-row"><div class="step-num">3</div><div class="step-text">Ask questions about your document in plain English</div></div>
         </div>

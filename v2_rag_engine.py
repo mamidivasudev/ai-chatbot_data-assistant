@@ -109,6 +109,45 @@ def extract_text_from_docx(file_path):
             parts.append(text)
     return "\n".join(parts)
 
+def extract_text_from_pdf(file_path):
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        import PyPDF2 as pypdf
+        PdfReader = pypdf.PdfReader
+        
+    text_parts = []
+    try:
+        reader = PdfReader(file_path)
+        for i, page in enumerate(reader.pages):
+            page_text = page.extract_text()
+            if page_text:
+                text_parts.append(f"## SECTION: Page {i+1}\n" + page_text.strip())
+        return "\n\n".join(text_parts)
+    except Exception as e:
+        raise ValueError(f"Failed to read PDF: {e}")
+
+def extract_text_from_excel(file_path, filename):
+    import pandas as pd
+    try:
+        if filename.endswith(".csv"):
+            df = pd.read_csv(file_path)
+            sheets = {"Data": df}
+        else:
+            sheets = pd.read_excel(file_path, sheet_name=None)
+            
+        text_parts = []
+        for sheet_name, df in sheets.items():
+            text_parts.append(f"\n\n## SECTION: Excel Sheet '{sheet_name}'\n")
+            # Convert each row to a textual format
+            for index, row in df.iterrows():
+                row_str = " | ".join(f"{col}: {val}" for col, val in row.items() if pd.notna(val))
+                if row_str.strip():
+                    text_parts.append(row_str)
+        return "\n".join(text_parts)
+    except Exception as e:
+        raise ValueError(f"Failed to read Spreadsheet: {e}")
+
 def create_overlapping_chunks(text, chunk_size, overlap):
     chunks = []
     sections = text.split("## SECTION: ")
@@ -142,15 +181,19 @@ def ingest_file_v2(file_path, filename):
     """Parses file, chunks it, and stores in ChromaDB."""
     print(f"V2 Ingesting: {filename}")
     text = ""
-    if filename.endswith(".pdf"):
-        raise ValueError("PDF files are not supported yet. Please convert your file to .docx or .txt and try again.")
-    elif filename.endswith(".docx"):
+    filename_lower = filename.lower()
+    
+    if filename_lower.endswith(".pdf"):
+        text = extract_text_from_pdf(file_path)
+    elif filename_lower.endswith(".docx"):
         text = extract_text_from_docx(file_path)
-    elif filename.endswith(".txt"):
+    elif filename_lower.endswith(".txt"):
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             text = f.read()
+    elif filename_lower.endswith(".csv") or filename_lower.endswith(".xlsx") or filename_lower.endswith(".xls"):
+        text = extract_text_from_excel(file_path, filename_lower)
     else:
-        raise ValueError("Unsupported file type for V2. Please use .docx or .txt")
+        raise ValueError("Unsupported file type for V2. Please use .docx, .txt, .pdf, .xlsx, or .csv")
 
     if not text.strip():
         raise ValueError("File is empty or could not be read.")
