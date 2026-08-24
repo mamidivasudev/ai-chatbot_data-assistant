@@ -523,23 +523,25 @@ st.markdown("""
 # Session state defaults
 # ─────────────────────────────────────────────
 for key, default in {
+    "mode": "Database AI Assistant",
     "db_type": "MS SQL",
     "mssql_conn": None,
     "all_tables": [],
     "selected_tables": [],
     "chat_history": [],
     "table_multiselect": [],
-    "project_files": [],
-    "project_path": "",
-    "project_answer": "",
     "suggested_questions": [],
     "last_schema_for_questions": "",
     "pending_question": None,
     "db_identifier": "",
     "business_rules": "",
+    "project_files": [],
+    "project_answer": "",
+    "project_chunks": [],
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
+
 
 
 # ─────────────────────────────────────────────
@@ -549,15 +551,16 @@ with st.sidebar:
     # App wordmark
     st.markdown("""
     <div style="padding:0.25rem 0 1rem; border-bottom:1px solid var(--border); margin-bottom:0.75rem;">
-        <span style="font-size:1.05rem; font-weight:700; color:var(--text-1); letter-spacing:-0.01em;">⬡ DB&nbsp;<span style="color:var(--accent)">Assistant</span></span>
+        <span style="font-size:1.05rem; font-weight:700; color:var(--text-1); letter-spacing:-0.01em;">⬡ AI&nbsp;<span style="color:var(--accent)">Assistant</span></span>
     </div>
     """, unsafe_allow_html=True)
 
     # Mode Toggle
-    mode = st.sidebar.radio("Mode", ["Database AI Assistant", "File Reader AI Assistant"], label_visibility="collapsed")
+    mode = st.radio("Mode", ["Database AI Assistant", "File Reader AI Assistant"], key="mode", label_visibility="collapsed")
+    st.divider()
 
-    # Database selection
     if mode == "Database AI Assistant":
+        # Database selection
         st.markdown('<p class="sidebar-section-label">Database</p>', unsafe_allow_html=True)
         db_type = st.selectbox(
             "Database Type",
@@ -579,54 +582,21 @@ with st.sidebar:
             st.session_state["chat_history"] = []
             st.session_state["db_type"] = db_type
             st.rerun()
-    else:
-        db_type = st.session_state["db_type"]
 
-    # Environment selection
-    st.markdown('<p class="sidebar-section-label">Environment</p>', unsafe_allow_html=True)
-    env = st.selectbox("Environment", ["dev", "qa", "prod"], key="db_environment", label_visibility="collapsed")
-    
-    # Model selection
-    st.markdown('<p class="sidebar-section-label">Model</p>', unsafe_allow_html=True)
-    available_models = list_ollama_models()
-    if available_models:
-        selected_model = st.selectbox("Model", options=available_models, key="db_model", label_visibility="collapsed")
-    else:
-        st.warning("No Ollama models found. Run `ollama pull <model>` first.")
-        selected_model = st.text_input("Model name", value="qwen2.5-coder:7b", label_visibility="collapsed")
-
-    # ── File Reader Mode ──
-    if mode == "File Reader AI Assistant":
-        st.markdown('<p class="sidebar-section-label">Upload Files</p>', unsafe_allow_html=True)
-        uploaded_files = st.file_uploader("Upload PDFs or Code", accept_multiple_files=True, label_visibility="collapsed")
+        # Environment selection
+        st.markdown('<p class="sidebar-section-label">Environment</p>', unsafe_allow_html=True)
+        env = st.selectbox("Environment", ["dev", "qa", "prod"], key="db_environment", label_visibility="collapsed")
         
-        if st.button("Process Files", use_container_width=True):
-            if not uploaded_files:
-                st.warning("Please upload at least one file.")
-            else:
-                try:
-                    import tempfile
-                    import os
-                    
-                    # Create a temporary directory on the server
-                    temp_dir = tempfile.mkdtemp()
-                    
-                    # Save all uploaded files to this temporary directory
-                    for uf in uploaded_files:
-                        with open(os.path.join(temp_dir, uf.name), "wb") as f:
-                            f.write(uf.getbuffer())
-                            
-                    # Use the existing read_project function on the temporary directory
-                    files = read_project(temp_dir)
-                    st.session_state["project_files"] = files
-                    st.session_state["project_path"] = "Uploaded Files"
-                    st.session_state["project_answer"] = ""
-                    st.success(f"{len(files)} files loaded")
-                except Exception as e:
-                    st.error(str(e))
+        # Model selection
+        st.markdown('<p class="sidebar-section-label">Model</p>', unsafe_allow_html=True)
+        available_models = list_ollama_models()
+        if available_models:
+            selected_model = st.selectbox("Model", options=available_models, key="db_model", label_visibility="collapsed")
+        else:
+            st.warning("No Ollama models found. Run `ollama pull <model>` first.")
+            selected_model = st.text_input("Model name", value="qwen2.5-coder:7b", label_visibility="collapsed")
 
-    # ── Database Mode connection form ──
-    if mode == "Database AI Assistant":
+        # ── Database Mode connection form ──
         st.markdown('<p class="sidebar-section-label">Connection</p>', unsafe_allow_html=True)
         conn_params = {}
         connect_disabled = False
@@ -776,6 +746,44 @@ with st.sidebar:
                 st.session_state["business_rules"] = ""
                 st.rerun()
 
+    elif mode == "File Reader AI Assistant":
+        db_type = st.session_state["db_type"]
+        st.markdown('<p class="sidebar-section-label">Upload Document</p>', unsafe_allow_html=True)
+        uploaded_file = st.file_uploader("Upload .docx or .txt file", type=["docx", "txt"], label_visibility="collapsed")
+        
+        # Model selection
+        st.markdown('<p class="sidebar-section-label">Model</p>', unsafe_allow_html=True)
+        available_models = list_ollama_models()
+        if available_models:
+            selected_model = st.selectbox("Model", options=available_models, key="file_model", label_visibility="collapsed")
+        else:
+            st.warning("No Ollama models found.")
+            selected_model = st.text_input("Model name", value="llama3:latest", label_visibility="collapsed")
+
+        if st.button("Process File", use_container_width=True):
+            if not uploaded_file:
+                st.warning("Please upload a file first.")
+            else:
+                with st.spinner("Processing document..."):
+                    import os
+                    import v2_rag_engine
+                    
+                    os.makedirs(v2_rag_engine.V2_UPLOAD_DIR, exist_ok=True)
+                    dest_path = os.path.join(v2_rag_engine.V2_UPLOAD_DIR, uploaded_file.name)
+                    
+                    # save file
+                    with open(dest_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                        
+                    try:
+                        res = v2_rag_engine.ingest_file_v2(dest_path, uploaded_file.name)
+                        st.session_state["project_files"] = [uploaded_file.name]
+                        st.session_state["project_answer"] = ""
+                        st.session_state["project_chunks"] = []
+                        st.success(f"File processed successfully! ({res.get('chunks_added', 0)} chunks loaded)")
+                    except Exception as e:
+                        st.error(f"Error processing file: {e}")
+
     st.divider()
     if st.button("↺  Reset App", use_container_width=True, help="Reset all inputs and settings"):
         if "mssql_conn" in st.session_state and st.session_state["mssql_conn"] is not None:
@@ -786,69 +794,68 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-    def load_defaults():
-        st.session_state["db_server"] = "192.168.1.18"
-        st.session_state["db_database"] = "Hims_Zrams"
-        st.session_state["db_auth_mode"] = "SQL Server Authentication"
-        st.session_state["db_username"] = "Sa"
-        st.session_state["db_password"] = "Satra@123"
-        st.session_state["db_model"] = "llama3:latest"
-
-    st.button("Load Default", use_container_width=True, help="Load preset connection details", on_click=load_defaults)
-
-
 # ─────────────────────────────────────────────
 # Main — File Reader Mode
 # ─────────────────────────────────────────────
 if mode == "File Reader AI Assistant":
-    st.markdown("## 📁 File Reader")
-    st.caption("Ask questions about your codebase or project files")
+    st.markdown("## 📄 Document AI Assistant")
+    st.caption("Ask questions about your uploaded document")
 
-    if not st.session_state["project_files"]:
+    if not st.session_state.get("project_files"):
         st.markdown("""
         <div class="welcome-card">
             <h3>Getting started</h3>
-            <div class="step-row"><div class="step-num">1</div><div class="step-text">Enter your project folder path in the sidebar</div></div>
-            <div class="step-row"><div class="step-num">2</div><div class="step-text">Click <strong>Load Project</strong> to index your files</div></div>
-            <div class="step-row"><div class="step-num">3</div><div class="step-text">Ask questions about your code in plain English</div></div>
+            <div class="step-row"><div class="step-num">1</div><div class="step-text">Upload a .docx or .txt file in the sidebar</div></div>
+            <div class="step-row"><div class="step-num">2</div><div class="step-text">Click <strong>Process File</strong> to analyze it</div></div>
+            <div class="step-row"><div class="step-num">3</div><div class="step-text">Ask questions about your document in plain English</div></div>
         </div>
         """, unsafe_allow_html=True)
         st.stop()
 
-    project_question = st.chat_input("Ask about the project…")
+    project_question = st.chat_input("Ask about the document...")
 
     if project_question:
         if not project_question.strip():
             st.warning("Please enter a question.")
             st.stop()
 
-        matched_files = search_files(project_question, st.session_state["project_files"])
-        prompt = ""
-        for file in matched_files:
-            prompt += f"\n\nFILE: {file['filename']}\n"
-            prompt += file["content"][:80000]
-        prompt += f"\n\nQuestion:\n{project_question}"
+        import v2_rag_engine
+        from ollama_client import ask_ollama
 
-        with st.spinner("Analysing project…"):
-            answer = ask_ollama(prompt, model=selected_model)
+        with st.spinner("Analyzing document..."):
+            # Retrieve relevant chunks
+            chunks = v2_rag_engine.retrieve_and_rerank(project_question)
+            
+            if not chunks:
+                answer = "This detail is currently not available in the uploaded document."
+            else:
+                # Build prompt
+                prompt = "You must answer the user's question using ONLY the provided document context.\n\n"
+                prompt += "DOCUMENT CONTEXT:\n" + "\n\n---\n\n".join(chunks) + "\n\n"
+                prompt += f"USER QUESTION: {project_question}\n\n"
+                prompt += "Answer directly without 'According to the document'. If the answer is not in the context, say 'This detail is currently not available.'"
+
+                answer = ask_ollama(prompt, model=st.session_state.get("file_model", "llama3:latest"))
 
         st.session_state["project_answer"] = answer
+        st.session_state["project_chunks"] = chunks
 
-        with st.expander(f"📎 {len(matched_files)} matched files", expanded=False):
-            for file in matched_files:
-                st.code(file["path"], language="")
-
-    if st.session_state["project_answer"]:
+    if st.session_state.get("project_answer"):
         st.markdown("**Answer**")
         st.info(st.session_state["project_answer"])
 
-    st.stop()
+        if st.session_state.get("project_chunks"):
+            with st.expander("📎 View Reference Context"):
+                for i, chunk in enumerate(st.session_state["project_chunks"]):
+                    st.markdown(f"**Chunk {i+1}**\n{chunk}")
+                    st.divider()
 
+    st.stop()
 
 # ─────────────────────────────────────────────
 # Main — Database Mode landing
 # ─────────────────────────────────────────────
-if mode == "Database AI Assistant" and st.session_state["mssql_conn"] is None:
+if st.session_state["mssql_conn"] is None:
     desc_query_lang = "T-SQL" if db_type == "MS SQL" else ("NoSQL queries" if db_type in ["MongoDB", "Redis"] else "SQL")
 
     st.markdown(f"## 🗄️ {db_type} Assistant")

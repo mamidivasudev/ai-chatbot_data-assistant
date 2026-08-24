@@ -220,11 +220,15 @@ def get_db_schema_text(conn, db_type, selected_items):
         schema_text = []
         cursor = conn.cursor()
         for _, table in selected_items:
-            cursor.execute(f"DESCRIBE `{table}`")
+            cursor.execute("""
+                SELECT column_name, column_type, is_nullable, column_key, column_default 
+                FROM information_schema.columns 
+                WHERE table_schema = DATABASE() AND table_name = %s
+                ORDER BY ordinal_position
+            """, (table,))
             cols = cursor.fetchall()
             lines = [f"TABLE: {table}"]
             for col in cols:
-                # col[0]=Field, col[1]=Type, col[2]=Null, col[3]=Key, col[4]=Default, col[5]=Extra
                 flags = []
                 if col[3] == "PRI":
                     flags.append("PK")
@@ -318,7 +322,8 @@ def get_db_schema_text(conn, db_type, selected_items):
         schema_text = []
         cursor = conn.cursor()
         for _, table in selected_items:
-            cursor.execute(f"PRAGMA table_info('{table}')")
+            table_sanitized = table.replace('"', '""')
+            cursor.execute(f'PRAGMA table_info("{table_sanitized}")')
             cols = cursor.fetchall()
             lines = [f"TABLE: {table}"]
             for col in cols:

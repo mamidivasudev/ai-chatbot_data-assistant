@@ -19,11 +19,15 @@ RELEVANCE_THRESHOLD = -8.0  # ms-marco scores are usually logits, > 0 is very go
 # Initialize clients lazily to save memory on startup
 _chroma_client = None
 _cross_encoder = None
+_multilingual_ef = None
 
 from chromadb.utils import embedding_functions
 
-# Multilingual Embedding Function for ChromaDB
-multilingual_ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="paraphrase-multilingual-MiniLM-L12-v2")
+def get_embedding_function():
+    global _multilingual_ef
+    if _multilingual_ef is None:
+        _multilingual_ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="paraphrase-multilingual-MiniLM-L12-v2")
+    return _multilingual_ef
 
 def needs_translation(text: str) -> str:
     """Detects Telugu or Hindi (Devanagari) script and returns the language name."""
@@ -35,12 +39,10 @@ def needs_translation(text: str) -> str:
             return "Hindi"
     return ""
 
-TRANSLATION_MODEL = "llama3:latest"
-
-async def translate_to_english(text: str, model: str = TRANSLATION_MODEL) -> str:
-    """Translates Telugu/Hindi query to English using aya:8b before retrieval."""
+async def translate_to_english(text: str, model: str = "llama3:latest") -> str:
+    """Translates Telugu/Hindi query to English using Ollama before retrieval."""
     payload = {
-        "model": TRANSLATION_MODEL,
+        "model": model,
         "messages": [
             {"role": "system", "content": "You are a professional translator. Translate the user's message to English. Respond with ONLY the English translation — no quotes, no explanation, no preamble."},
             {"role": "user", "content": text}
@@ -58,10 +60,10 @@ async def translate_to_english(text: str, model: str = TRANSLATION_MODEL) -> str
     except Exception as e:
         return text  # fall back to original query if translation fails
 
-async def translate_from_english(text: str, target_language: str) -> str:
-    """Translates an English answer back to the target language using aya:8b."""
+async def translate_from_english(text: str, target_language: str, model: str = "llama3:latest") -> str:
+    """Translates an English answer back to the target language using Ollama."""
     payload = {
-        "model": TRANSLATION_MODEL,
+        "model": model,
         "messages": [
             {"role": "system", "content": f"You are a professional translator. Translate the following English text to {target_language}. Respond with ONLY the {target_language} translation — no quotes, no explanation, no English words mixed in."},
             {"role": "user", "content": text}
@@ -140,13 +142,15 @@ def ingest_file_v2(file_path, filename):
     """Parses file, chunks it, and stores in ChromaDB."""
     print(f"V2 Ingesting: {filename}")
     text = ""
-    if filename.endswith(".docx"):
+    if filename.endswith(".pdf"):
+        raise ValueError("PDF files are not supported yet. Please convert your file to .docx or .txt and try again.")
+    elif filename.endswith(".docx"):
         text = extract_text_from_docx(file_path)
     elif filename.endswith(".txt"):
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             text = f.read()
     else:
-        raise ValueError("Unsupported file type for V2. Use .docx or .txt")
+        raise ValueError("Unsupported file type for V2. Please use .docx or .txt")
 
     if not text.strip():
         raise ValueError("File is empty or could not be read.")
@@ -163,7 +167,7 @@ def ingest_file_v2(file_path, filename):
         
     collection = client.get_or_create_collection(
         name="rrams_multilingual_v2",
-        embedding_function=multilingual_ef
+        embedding_function=get_embedding_function()
     )
         
     ids = [str(uuid.uuid4()) for _ in chunks]
@@ -186,7 +190,7 @@ def retrieve_and_rerank(query):
     client = get_chroma_client()
     collection = client.get_or_create_collection(
         name="rrams_multilingual_v2",
-        embedding_function=multilingual_ef
+        embedding_function=get_embedding_function()
     )
     
     if collection.count() == 0:

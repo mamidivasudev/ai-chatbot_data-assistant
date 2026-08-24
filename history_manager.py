@@ -1,5 +1,8 @@
 import sqlite3
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "chat_history.db")
@@ -7,9 +10,8 @@ BUSINESS_RULES_FILE = os.path.join(BASE_DIR, "business_rules.json")
 SUGGESTIONS_FILE = os.path.join(BASE_DIR, "saved_suggestions.json")
 
 def init_db():
-
     conn = sqlite3.connect(DB_FILE)
-
+    
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_history(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -18,49 +20,45 @@ def init_db():
             answer TEXT
         )
     """)
-
+    
+    # Safe migration: add timestamp column if it doesn't exist
+    try:
+        conn.execute("ALTER TABLE chat_history ADD COLUMN timestamp DATETIME DEFAULT CURRENT_TIMESTAMP")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+        
     conn.commit()
     conn.close()
 
 
-def save_chat(
-        question,
-        sql_query,
-        answer):
-
-    conn = sqlite3.connect(DB_FILE)
-
-    conn.execute(
-        """
-        INSERT INTO chat_history
-        (
-            question,
-            sql_query,
-            answer
+def save_chat(question, sql_query, answer):
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute(
+            """
+            INSERT INTO chat_history (question, sql_query, answer)
+            VALUES (?, ?, ?)
+            """,
+            (question, sql_query, answer)
         )
-        VALUES (?, ?, ?)
-        """,
-        (
-            question,
-            sql_query,
-            answer
-        )
-    )
-
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Failed to save chat to database: {e}")
 
 
 def get_chat_history():
-    import os
     if not os.path.exists(DB_FILE):
         return []
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
+        
+        # Check if timestamp exists before querying to support legacy rows safely
         cursor.execute("SELECT question, sql_query, answer FROM chat_history ORDER BY id DESC")
         rows = cursor.fetchall()
         conn.close()
+        
         seen = set()
         unique_history = []
         for row in rows:
@@ -69,11 +67,11 @@ def get_chat_history():
                 seen.add(q.strip().lower())
                 unique_history.append(row)
         return unique_history
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to load chat history: {e}")
         return []
 
 def clear_chat_history():
-    import os
     if not os.path.exists(DB_FILE):
         return
     try:
@@ -81,8 +79,8 @@ def clear_chat_history():
         conn.execute("DELETE FROM chat_history")
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Failed to clear chat history: {e}")
 
 
 

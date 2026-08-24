@@ -52,6 +52,7 @@ from session_manager import (
     add_file_session_history
 )
 from cryptography.fernet import Fernet
+import v2_rag_engine
 # ─────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────
@@ -487,7 +488,6 @@ async def serve_db_tester():
 
 @app.post("/upload-file")
 async def v2_upload_file_endpoint(file: UploadFile = File(...)):
-    import v2_rag_engine
     import shutil
     import os
     try:
@@ -545,7 +545,6 @@ async def v2_ask_your_query(
     model: Optional[str] = Form("llama3:latest"),
     session_id: Optional[str] = Form(None)
 ):
-    import v2_rag_engine
     import uuid
     import time
     import httpx
@@ -609,9 +608,9 @@ async def v2_ask_your_query(
             response_data = response.json()
             answer = response_data.get("message", {}).get("content", "")
             answer = sanitize_answer(answer)
-            # If question was Telugu/Hindi, translate the English answer back using aya:8b
+            # If question was Telugu/Hindi, translate the English answer back using the model
             if detected_lang:
-                answer = await v2_rag_engine.translate_from_english(answer, detected_lang)
+                answer = await v2_rag_engine.translate_from_english(answer, detected_lang, model=model)
 
         return AskFilesResponse(
             session_id=session_id or str(uuid.uuid4()),
@@ -631,7 +630,6 @@ async def v2_ask_your_query_stream(
     model: Optional[str] = Form("llama3:latest"),
     session_id: Optional[str] = Form(None)
 ):
-    import v2_rag_engine
     import uuid
     import time
     import httpx
@@ -724,7 +722,7 @@ async def v2_ask_your_query_stream(
                 elif buffer:
                     final_answer = buffer
                     if detected_lang:
-                        final_answer = await v2_rag_engine.translate_from_english(buffer, detected_lang)
+                        final_answer = await v2_rag_engine.translate_from_english(buffer, detected_lang, model=model)
                     yield f"event: delta\ndata: {json.dumps({'text': final_answer})}\n\n"
                     
                 yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
