@@ -1,0 +1,62 @@
+# AI Chatbot Data Assistant - Run Instructions
+
+This project contains two main interfaces:
+1. A FastAPI backend API (`fastapi_app.py`)
+2. A Streamlit frontend application (`mssql_app.py`)
+
+## Prerequisites
+1. **Python 3.8+** installed on your system.
+2. **Ollama** installed and running locally. The application expects Ollama to be available at `http://127.0.0.1:11434`. Make sure you have pulled the required models (e.g., `ollama run llama3` or whatever model you intend to use).
+3. **Database Drivers**: Depending on the database you connect to, ensure appropriate drivers are installed on your OS (e.g., ODBC drivers for MS SQL Server).
+
+## Setup Instructions
+
+1. **Navigate to the project directory:**
+   ```bash
+   cd D:\AI\AI_chatbot_data_assistant
+   ```
+
+2. **Create a virtual environment (optional but recommended):**
+   ```bash
+   python -m venv venv
+   # On Windows:
+   venv\Scripts\activate
+   # On macOS/Linux:
+   source venv/bin/activate
+   ```
+
+3. **Install the dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## Running the Application
+
+### Option 1: Running the FastAPI Backend
+The FastAPI app provides REST endpoints (e.g., `/ask`, `/connect`, `/schema`) for integrations.
+
+1. **Set Environment Variables (Optional):**
+   You can set a `SECRET_KEY` for JWT authentication if needed.
+   ```bash
+   set SECRET_KEY=your_secret_key
+   ```
+
+2. **Start the FastAPI Server:**
+   ```bash
+   uvicorn fastapi_app:app --host 0.0.0.0 --port 8000
+   ```
+   The API documentation (Swagger UI) will be available at: `http://localhost:8000/docs`
+
+### Option 2: Running the Streamlit UI
+The Streamlit app provides an interactive web interface for chatting with your data.
+
+1. **Start the Streamlit Server:**
+   ```bash
+   streamlit run mssql_app.py
+   ```
+   This will open a new tab in your default web browser (typically at `http://localhost:8501`) with the Chatbot UI.
+
+## Additional Notes
+- Ensure your database credentials are correct when connecting through the UI or API.
+- Check `audit.log` for query and execution logs.
+- The project also contains testing interfaces: `db_tester.html` and `rag_tester.html`, which can be opened in any web browser to test the backend endpoints.

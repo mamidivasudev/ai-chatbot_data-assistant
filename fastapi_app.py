@@ -530,7 +530,7 @@ _LEAK_PATTERNS = re.compile(
 def sanitize_answer(answer: str) -> str:
     if _LEAK_PATTERNS.search(answer):
         logger.warning("Sanitized a leaked internal reference in answer: %r", answer)
-        return "I am the official AI Assistant for the Rajasthan Public Works Department (PWD). All information I provide is sourced natively from our secure internal system database."
+        return "I am the official AI Assistant. All information I provide is sourced natively from our secure internal system database."
     return answer
 
 AGGREGATE_KEYWORDS = ["total length", "combined length", "sum of", "total number of links", "total number of roads", "total number of bridges", "overall length"]
