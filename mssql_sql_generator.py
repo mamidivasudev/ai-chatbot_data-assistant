@@ -3,13 +3,41 @@ import re
 from ollama_client import ask_ollama
 
 
-def generate_tsql(question, schema_text, business_rules="", model=None):
-    rules_text = load_skills(question)
+def generate_tsql(question, schema_text, business_rules="", model=None,
+                  db_identifier=None, dynamic_rules="", examples_text=""):
+    # Skills are gated on the question, the schema actually supplied, and the
+    # connected database — see skills.py.
+    rules_text = load_skills(
+        question,
+        schema_text=schema_text,
+        db_identifier=db_identifier,
+    )
+
+    # Rules derived from the tables the admin actually selected — allowed table
+    # list, soft-delete filters, real FK join paths, sampled column values.
+    # See schema_profiler.py.
+    if dynamic_rules:
+        rules_text += dynamic_rules
+
+    # Verified (question, SQL) pairs resembling this question. Examples teach
+    # conventions that rules struggle to state. See query_library.py.
+    if examples_text:
+        rules_text += examples_text
+
+    # Per-database rules configured by an admin, injected alongside the skills
+    # rather than discarded.
+    custom_rules = ""
+    if business_rules and str(business_rules).strip():
+        custom_rules = (
+            "\n\nCustom Business Rules for this database:\n"
+            f"{str(business_rules).strip()}\n"
+        )
+
     prompt = f"""You are a MS SQL AI Assistant Server (T-SQL) expert.
 
 Database Schema:
 {schema_text}
-{rules_text}
+{rules_text}{custom_rules}
 
 Rules:
 1. Return ONLY a valid T-SQL SELECT statement.
@@ -21,6 +49,7 @@ Rules:
 7. Use TOP instead of LIMIT for row limiting.
 8. For string patterns use LIKE with % wildcards.
 9. For date functions use GETDATE(), DATEADD(), DATEDIFF(), FORMAT() — not MySQL syntax.
+10. Every table and column you reference must appear in the Database Schema above. Never substitute a similarly named table.
 
 Question:
 {question}

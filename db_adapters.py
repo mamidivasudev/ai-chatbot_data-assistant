@@ -7,7 +7,8 @@ from ollama_client import ask_ollama
 from mssql_connector import connect_mssql, get_available_drivers
 from mssql_schema_reader import get_all_tables, get_selected_schema_text
 from mssql_sql_generator import generate_tsql, generate_answer_summary
-from mssql_executor import validate_tsql, execute_tsql
+from mssql_executor import validate_tsql, execute_tsql, MAX_ROWS
+from sql_guard import validate_read_only
 
 DATABASES = [
     "MS SQL",
@@ -568,20 +569,18 @@ def validate_db_query(db_type, query):
         return validate_tsql(query)
         
     if db_type in ["MySQL", "PostgreSQL", "Oracle Database", "SQLite"]:
-        stripped = query.strip().lower()
-        if not stripped.startswith("select"):
-            return False, "Query must start with SELECT."
-            
-        blocked = [
-            r"\bdelete\b", r"\bupdate\b", r"\binsert\b", r"\bdrop\b",
-            r"\btruncate\b", r"\balter\b", r"\bcreate\b", r"\bexec\b",
-            r"\bexecute\b", r"\bshutdown\b", r"\bgrant\b", r"\brevoke\b"
-        ]
-        blocked_re = re.compile("|".join(blocked), re.IGNORECASE)
-        match = blocked_re.search(query)
-        if match:
-            return False, f"Blocked keyword detected: '{match.group()}'"
-        return True, ""
+        # Same normalising guard as MS SQL (comments and literals stripped
+        # before matching, single statement only), plus per-dialect extras.
+        extra = {
+            # COPY ... TO/FROM reads and writes server files; DO runs procedural code.
+            "PostgreSQL": ["copy", "do", "vacuum", "analyze", "cluster", "listen", "notify"],
+            # LOAD DATA / INTO OUTFILE write files; HANDLER bypasses the parser.
+            "MySQL": ["load", "outfile", "dumpfile", "handler", "flush", "reset"],
+            "Oracle Database": ["declare", "begin", "lock", "purge", "flashback"],
+            # ATTACH mounts another database file; PRAGMA can change durability.
+            "SQLite": ["attach", "detach", "pragma", "reindex", "vacuum"],
+        }.get(db_type, [])
+        return validate_read_only(query, extra_blocked=extra)
         
     elif db_type == "MongoDB":
         try:
@@ -621,28 +620,32 @@ def validate_db_query(db_type, query):
 # ==========================================
 # 5. Query Execution Functions
 # ==========================================
-def execute_db_query(conn, db_type, query):
+def execute_db_query(conn, db_type, query, max_rows=MAX_ROWS):
     """
     Execute query against target connection.
     Returns: (columns_list, rows_list)
+
+    Re-validates first. This is the last point before the query reaches the
+    database, so safety must not depend on a caller having checked.
     """
     if db_type == "MS SQL":
         return execute_tsql(conn, query)
-        
+
     elif db_type in ["MySQL", "PostgreSQL", "Oracle Database", "SQLite"]:
+        is_safe, reason = validate_db_query(db_type, query)
+        if not is_safe:
+            raise ValueError(f"Refusing to execute non-read-only query: {reason}")
+
         cursor = conn.cursor()
         cursor.execute(query)
-        
+
         columns = []
         if cursor.description:
             columns = [col[0] for col in cursor.description]
-            
-        rows = cursor.fetchall()
-        # Convert any row objects/tuples into standard lists
-        rows = [list(row) for row in rows]
-        
-        # Commit if needed, though SELECT shouldn't mutate. 
-        # PostgreSQL/MySQL cursor close is clean.
+
+        # fetchmany, so an unbounded result set cannot be pulled into memory.
+        rows = [list(row) for row in cursor.fetchmany(max_rows)]
+
         cursor.close()
         return columns, rows
         

@@ -35,80 +35,6 @@
         ],
         "Hims_Zrams": [
             {
-                "id": "pwd_primary_data_source",
-                "name": "Primary Data Source (RoadDetails_Vani)",
-                "enabled": true,
-                "priority": 90,
-                "match": "always",
-                "keywords": [],
-                "requires_tables": [
-                    "RoadDetails_Vani"
-                ],
-                "instruction": "- PREFERRED SOURCE: Retrieve road data from [RoadDetails_Vani] when it is available.\n- ROAD LENGTH: A specific road's length is the Length column of RoadDetails_Vani for that RoadCode.\n- SPECIFIC ROAD: When the question names a particular road, filter with RoadCode = '<code>'.\n- NOT ROAD-SPECIFIC: When the question is not about one particular road, do NOT put RoadCode in the WHERE clause.\n- LINKS: Include linkcode in the WHERE clause only when the question is about a link."
-            },
-            {
-                "id": "pwd_deduplication",
-                "name": "Duplicate Handling",
-                "enabled": true,
-                "priority": 92,
-                "match": "always",
-                "keywords": [],
-                "requires_tables": [],
-                "instruction": "- Rows carrying identical data for the requested information are duplicates; return only one.\n- Use DISTINCT whenever duplicate rows are possible.\n- If duplicates persist because of extra columns, return the first record only, using ROW_NUMBER() or TOP (1) with an explicit ORDER BY."
-            },
-            {
-                "id": "pwd_length_columns",
-                "name": "Length Column Selection",
-                "enabled": true,
-                "priority": 94,
-                "match": "any",
-                "keywords": [
-                    "length",
-                    "long",
-                    "longest",
-                    "km",
-                    "kilometre",
-                    "kilometer",
-                    "link"
-                ],
-                "requires_tables": [],
-                "instruction": "- LINK length: use the [llength] column.\n- ROAD length: use the [Length] column.\n- Do not substitute one for the other."
-            },
-            {
-                "id": "pwd_road_classification",
-                "name": "Road Classification Terminology",
-                "enabled": true,
-                "priority": 96,
-                "match": "any",
-                "keywords": [
-                    "category",
-                    "categories",
-                    "class",
-                    "classification",
-                    "major road",
-                    "district road",
-                    "sh",
-                    "nh",
-                    "mdr",
-                    "odr",
-                    "vr",
-                    "type",
-                    "types"
-                ],
-                "requires_tables": [],
-                "instruction": "- SYNONYMS: 'Class' and 'Category' both mean Road Category.\n- Use the [category] column to classify roads as SH Roads, MDR Roads and so on.\n- 'How many types of road categories' = COUNT(DISTINCT RoadClass).\n- 'Major Roads' means Category = 'SH'.\n- 'District Roads' means Category = 'MDR'.\n- FULL NAMES: State Highway = SH, National Highway = NH, Major District Road = MDR, Other District Road = ODR, Village Road = VR. Always filter on the abbreviation."
-            },
-            {
-                "id": "pwd_key_columns",
-                "name": "Key Column Differences",
-                "enabled": true,
-                "priority": 98,
-                "match": "always",
-                "keywords": [],
-                "requires_tables": [],
-                "instruction": "- The [Roads] table keys on [Road_id].\n- The [RoadMaster] and [LinkMaster] tables key on [RoadCode].\n- Never use RoadCode against the Roads table, or Road_id against RoadMaster/LinkMaster."
-            },
-            {
                 "id": "pwd_filter_literals",
                 "name": "PWD Filter Literals",
                 "enabled": true,
@@ -121,25 +47,6 @@
                 ],
                 "requires_tables": [],
                 "instruction": "- Filter District, Road and Section on exact values, e.g. WHERE r.District = 'Jhalawar'."
-            },
-            {
-                "id": "511a1a4a",
-                "name": "Road Length Units",
-                "enabled": true,
-                "priority": 105,
-                "match": "any",
-                "keywords": [
-                    "length",
-                    "km",
-                    "kilometre",
-                    "kilometer",
-                    "longest",
-                    "total length"
-                ],
-                "requires_tables": [
-                    "RoadMaster"
-                ],
-                "instruction": "- LENGTH UNITS: [dbo].[RoadMaster].[Length] is stored in METRES. Whenever the question asks for length in kilometres, divide by 1000.0 and CAST the result AS DECIMAL(10,2).\n- TEST DATA: Rows where RoadCode LIKE 'N%' are seed records and must be excluded from totals and rankings."
             },
             {
                 "id": "pwd_network_dashboard",
@@ -260,6 +167,25 @@
                     "BISBrdgLst"
                 ],
                 "instruction": "- BRIDGE TYPE CODES: Filter minor and major bridges on the codes 'MIN' and 'MAJ', e.g. WHERE BridgeType = 'MIN', not 'Minor'.\n- TOTAL BRIDGES: COUNT(BridgeCode) FROM BISBrdgLst.\n- VERY POOR BRIDGES: COUNT(DISTINCT bl.BridgeCode) FROM BISBrdgLst bl INNER JOIN oBISBCI bc ON bc.BridgeCode = bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'."
+            },
+            {
+                "id": "511a1a4a",
+                "name": "Road Length Units",
+                "enabled": true,
+                "priority": 105,
+                "match": "any",
+                "keywords": [
+                    "length",
+                    "km",
+                    "kilometre",
+                    "kilometer",
+                    "longest",
+                    "total length"
+                ],
+                "requires_tables": [
+                    "RoadMaster"
+                ],
+                "instruction": "- LENGTH UNITS: [dbo].[RoadMaster].[Length] is stored in METRES. Whenever the question asks for length in kilometres, divide by 1000.0 and CAST the result AS DECIMAL(10,2).\n- TEST DATA: Rows where RoadCode LIKE 'N%' are seed records and must be excluded from totals and rankings."
             }
         ]
     }

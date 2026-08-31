@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "examples": [
+    {
+      "id": "84a8c98b",
+      "question": "How many roads are there?",
+      "sql": "SELECT COUNT(*) FROM [dbo].[RoadMaster]",
+      "scope": "Hims_Zrams",
+      "notes": "",
+      "source": "api",
+      "added_on": "2026-08-31",
+      "enabled": true
+    },
+    {
+      "id": "f1fd1b31",
+      "question": "How many State Highways are there?",
+      "sql": "SELECT COUNT(*) FROM [dbo].[RoadMaster] WHERE RoadClass='SH'",
+      "scope": "Hims_Zrams",
+      "notes": "",
+      "source": "api",
+      "added_on": "2026-08-31",
+      "enabled": true
+    },
+    {
+      "id": "70ce8b23",
+      "question": "What is the longest road?",
+      "sql": "SELECT TOP 1 RoadCode, RoadName, Length FROM [dbo].[RoadMaster] ORDER BY Length DESC",
+      "scope": "Hims_Zrams",
+      "notes": "",
+      "source": "api",
+      "added_on": "2026-08-31",
+      "enabled": true
+    },
+    {
+      "id": "0e2db0af",
+      "question": "Total length of state highways in km",
+      "sql": "SELECT SUM(Length)/1000.0 FROM [dbo].[RoadMaster] WHERE RoadClass='SH'",
+      "scope": "Hims_Zrams",
+      "notes": "Length is stored in metres",
+      "source": "api",
+      "added_on": "2026-08-31",
+      "enabled": true
+    }
+  ]
+}
