@@ -24,13 +24,10 @@ import tempfile
 import shutil
 from typing import Any, Optional
 
-# --- OLLAMA CONNECTION ---
-# Default to a local Ollama, but let the environment override it so the API can
-# run on a host that reaches Ollama elsewhere.
-OLLAMA_HOST = os.environ.setdefault("OLLAMA_HOST", "http://127.0.0.1:11434")
-os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
-OLLAMA_CHAT_URL = OLLAMA_HOST.rstrip("/") + "/api/chat"
-# -------------------------
+# --- FIX FOR OLLAMA CONNECTION ---
+os.environ["OLLAMA_HOST"] = "http://127.0.0.1:11434"
+os.environ["NO_PROXY"] = "127.0.0.1,localhost"
+# ---------------------------------
 
 
 from fastapi import Depends, FastAPI, HTTPException, status, UploadFile, File, Form, Request
@@ -645,7 +642,7 @@ async def v2_ask_your_query(
         }
         
         async with httpx.AsyncClient() as client:
-            response = await client.post(OLLAMA_CHAT_URL, json=payload, timeout=180.0)
+            response = await client.post("http://localhost:11434/api/chat", json=payload, timeout=180.0)
             response.raise_for_status()
             response_data = response.json()
             answer = response_data.get("message", {}).get("content", "")
@@ -739,7 +736,7 @@ async def v2_ask_your_query_stream(
             
             try:
                 async with httpx.AsyncClient() as client:
-                    async with client.stream("POST", OLLAMA_CHAT_URL, json=payload, timeout=180.0) as response:
+                    async with client.stream("POST", "http://localhost:11434/api/chat", json=payload, timeout=180.0) as response:
                         response.raise_for_status()
                         async for line in response.aiter_lines():
                             if line:
@@ -812,12 +809,14 @@ class GlobalQuestionRequest(BaseModel):
     question: str
 
 
+# /env-list is an alias for /admin/environments — same handler, same response —
+# so callers using either path get identical results.
+@app.get("/env-list")
 @app.get("/admin/environments")
 def get_all_environments():
     if not os.path.exists(ADMIN_CONFIG_FILE):
         return {"environments": []}
     try:
-        import json
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             return {"environments": list(data.keys())}
