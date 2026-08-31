@@ -1,16 +1,13 @@
 {
-    "Dev": {
+    "default": {
         "server": "192.168.1.18",
         "database": "Hims_Zrams",
         "username": "Sa",
-        "password": "gAAAAABqiAaOPbzk091CkAxpgV9HV8OY3XZSR-PMrZTXRw6ycGJInPHkI5KUc8D1-QQtNa8oMgYLFjVkdFQnGc4ozwQ1e45CDQ==",
+        "password": "gAAAAABqlSP3Kve-6WGCxkz4yt0vhT226i0-Xx2aiNYAxveVqN4ZaX2g2VHUybpu426JbvHURaLV6EViRrcBZzrbOR6UpPQilA==",
         "auth_mode": "SQL Server Authentication",
-        "driver": null,
+        "driver": "",
         "tables": [
-            [
-                "dbo",
-                "Roads"
-            ]
+            ["dbo", "Roads"]
         ]
     }
 }
