@@ -348,6 +348,151 @@ def list_scopes(path=SKILLS_FILE):
     return sorted(read_document(path).get("scopes", {}).keys())
 
 
+# ---------------------------------------------------------------------------
+# CRUD
+# ---------------------------------------------------------------------------
+class SkillNotFound(KeyError):
+    """No skill with the requested id."""
+
+
+class DuplicateSkillId(ValueError):
+    """A skill with that id already exists."""
+
+
+def slugify(name, fallback="skill"):
+    """Readable id from a name: 'Road Length Units' -> 'road_length_units'."""
+    slug = re.sub(r"[^a-z0-9]+", "_", str(name or "").lower()).strip("_")
+    return slug[:48] or fallback
+
+
+def _unique_id(base, taken):
+    if base not in taken:
+        return base
+    n = 2
+    while f"{base}_{n}" in taken:
+        n += 1
+    return f"{base}_{n}"
+
+
+def all_skills(path=SKILLS_FILE):
+    """Every skill across every scope, each tagged with its scope."""
+    doc = read_document(path)
+    out = []
+    for scope, items in doc.get("scopes", {}).items():
+        for skill in items:
+            if isinstance(skill, dict):
+                out.append(dict(skill, scope=scope))
+    out.sort(key=lambda s: (s.get("scope") != GLOBAL_SCOPE, s.get("priority", 200), s.get("id", "")))
+    return out
+
+
+def get_skill(skill_id, path=SKILLS_FILE):
+    """Return (scope, skill). Raises SkillNotFound."""
+    doc = read_document(path)
+    for scope, items in doc.get("scopes", {}).items():
+        for skill in items:
+            if isinstance(skill, dict) and skill.get("id") == skill_id:
+                return scope, skill
+    raise SkillNotFound(skill_id)
+
+
+def create_skill(scope=GLOBAL_SCOPE, skill_id=None, name="Custom Rule", instruction="",
+                 keywords=None, requires_tables=None, priority=200, enabled=True,
+                 match=None, path=SKILLS_FILE):
+    """Add a skill to a scope. Ids are readable slugs, deduplicated."""
+    instruction = (instruction or "").strip()
+    if not instruction:
+        raise ValueError("instruction cannot be empty.")
+
+    doc = read_document(path)
+    scope = (scope or GLOBAL_SCOPE).strip() or GLOBAL_SCOPE
+    doc.setdefault("scopes", {}).setdefault(scope, [])
+
+    taken = {s.get("id") for items in doc["scopes"].values() for s in items if isinstance(s, dict)}
+    if skill_id:
+        if skill_id in taken:
+            raise DuplicateSkillId(skill_id)
+        new_id = skill_id
+    else:
+        new_id = _unique_id(slugify(name), taken)
+
+    keywords = [k.strip() for k in (keywords or []) if str(k).strip() and str(k).strip() != "*"]
+    skill = {
+        "id": new_id,
+        "name": name or new_id,
+        "enabled": bool(enabled),
+        "priority": int(priority),
+        "match": match or ("any" if keywords else "always"),
+        "keywords": keywords,
+        "requires_tables": [t.strip() for t in (requires_tables or []) if str(t).strip()],
+        "instruction": instruction,
+    }
+    doc["scopes"][scope].append(skill)
+    doc["scopes"][scope].sort(key=lambda s: (s.get("priority", 200), s.get("id", "")))
+    write_document(doc, path)
+    return dict(skill, scope=scope)
+
+
+def update_skill(skill_id, changes, path=SKILLS_FILE):
+    """
+    Apply changes to one skill. Only supplied fields are touched.
+
+    `scope` in `changes` moves the skill to another scope.
+    """
+    doc = read_document(path)
+    for scope, items in doc.get("scopes", {}).items():
+        for index, skill in enumerate(items):
+            if not isinstance(skill, dict) or skill.get("id") != skill_id:
+                continue
+
+            updated = dict(skill)
+            for field in ("name", "instruction", "match"):
+                if changes.get(field) is not None:
+                    updated[field] = changes[field]
+            if changes.get("enabled") is not None:
+                updated["enabled"] = bool(changes["enabled"])
+            if changes.get("priority") is not None:
+                updated["priority"] = int(changes["priority"])
+            if changes.get("keywords") is not None:
+                updated["keywords"] = [
+                    k.strip() for k in changes["keywords"] if str(k).strip() and str(k).strip() != "*"
+                ]
+                if changes.get("match") is None:
+                    updated["match"] = "any" if updated["keywords"] else "always"
+            if changes.get("requires_tables") is not None:
+                updated["requires_tables"] = [
+                    t.strip() for t in changes["requires_tables"] if str(t).strip()
+                ]
+            if not str(updated.get("instruction", "")).strip():
+                raise ValueError("instruction cannot be empty.")
+
+            new_scope = (changes.get("scope") or scope).strip() or scope
+            if new_scope != scope:
+                items.pop(index)
+                doc["scopes"].setdefault(new_scope, []).append(updated)
+                doc["scopes"][new_scope].sort(key=lambda s: (s.get("priority", 200), s.get("id", "")))
+            else:
+                items[index] = updated
+                items.sort(key=lambda s: (s.get("priority", 200), s.get("id", "")))
+
+            write_document(doc, path)
+            return dict(updated, scope=new_scope)
+
+    raise SkillNotFound(skill_id)
+
+
+def delete_skill(skill_id, path=SKILLS_FILE):
+    """Remove a skill. Returns the deleted skill. Raises SkillNotFound."""
+    doc = read_document(path)
+    for scope, items in doc.get("scopes", {}).items():
+        for index, skill in enumerate(items):
+            if isinstance(skill, dict) and skill.get("id") == skill_id:
+                removed = items.pop(index)
+                write_document(doc, path)
+                return dict(removed, scope=scope)
+    raise SkillNotFound(skill_id)
+
+
 def describe_active_skills(question, schema_text=None, db_identifier=None):
     """Which skills fired, and why — for logging and for the admin UI."""
     return [

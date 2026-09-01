@@ -99,6 +99,21 @@
                 "instruction": "- SYNONYMS: 'Class' and 'Category' both mean Road Category.\n- Use the [category] column to classify roads as SH Roads, MDR Roads and so on.\n- 'How many types of road categories' = COUNT(DISTINCT RoadClass).\n- 'Major Roads' means Category = 'SH'.\n- 'District Roads' means Category = 'MDR'.\n- FULL NAMES: State Highway = SH, National Highway = NH, Major District Road = MDR, Other District Road = ODR, Village Road = VR. Always filter on the abbreviation."
             },
             {
+                "id": "national_highway_value_variants",
+                "name": "National Highway Value Variants",
+                "enabled": true,
+                "priority": 97,
+                "match": "any",
+                "keywords": [
+                    "national highway",
+                    "nh"
+                ],
+                "requires_tables": [
+                    "RoadMaster"
+                ],
+                "instruction": "- RoadClass stores National Highways under TWO values: 'NH' and 'NH National Highway'. When filtering or counting National Highways you MUST match both, e.g. WHERE RoadClass IN ('NH', 'NH National Highway').\n- Do not use LIKE 'NH%' for this: it would also match nothing else today, but the two exact values are the reliable filter."
+            },
+            {
                 "id": "pwd_key_columns",
                 "name": "Key Column Differences",
                 "enabled": true,
