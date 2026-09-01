@@ -13,36 +13,82 @@ def render_history(history, max_turns=4):
         return ""
     recent = history[-max_turns:]
     lines = []
-    for turn in recent:
+    for i, turn in enumerate(recent, 1):
         q = (turn.get("question") or "").strip()
         s = (turn.get("sql") or "").strip()
-        a = (turn.get("answer") or "").strip()
         if not q:
             continue
-        lines.append(f"Previous question: {q}")
+        lines.append(f"--- Turn {i} ---")
+        lines.append(f"Question: {q}")
         if s:
-            lines.append(f"Previous T-SQL: {s}")
-        if a:
-            lines.append(f"Previous answer: {a[:300]}")
+            lines.append(f"T-SQL: {s}")
+
+        # The rows are the important part: they carry the key values a
+        # follow-up must filter on.
+        columns = turn.get("columns") or []
+        rows = turn.get("rows") or []
+        if columns and rows:
+            lines.append("Rows returned:")
+            lines.append("  " + " | ".join(str(c) for c in columns))
+            for row in rows:
+                lines.append("  " + " | ".join("NULL" if v is None else str(v) for v in row))
+        elif turn.get("answer"):
+            lines.append(f"Answer: {turn['answer'][:200]}")
         lines.append("")
+
     if not lines:
         return ""
 
     rule = "=" * 60
     return (
         f"\n\n{rule}\nCONVERSATION SO FAR\n{rule}\n"
-        "The current question may be a follow-up that refers to the turns below "
-        "using words like 'it', 'that one', 'its name', or by omitting the subject. "
-        "Resolve those references from this history, then answer the CURRENT question. "
-        "If the current question stands on its own, ignore this history.\n\n"
+        "The CURRENT question may be a follow-up referring to the turns below with "
+        "words like 'it', 'this road', 'that one', 'its name', or by omitting the "
+        "subject entirely. Resolve the reference from the turns below, then answer "
+        "the CURRENT question. If the current question stands on its own, ignore "
+        "this history.\n\n"
+        "HOW TO FILTER A FOLLOW-UP (MANDATORY):\n"
+        "- Identify the row using a KEY VALUE that literally appears in 'Rows "
+        "returned' above, e.g. WHERE RoadCode = 'N0001'.\n"
+        "- If no key value is shown, repeat the previous query's own selection "
+        "logic as a subquery, e.g.\n"
+        "    WHERE RoadCode = (SELECT TOP 1 RoadCode FROM [dbo].[RoadMaster] ORDER BY Length DESC)\n"
+        "- NEVER invent an identifier. Do NOT write WHERE Id = 1, WHERE Id = 686 or "
+        "any other value that does not appear above. Guessing a key silently "
+        "returns a different row and is the worst possible failure.\n\n"
         + "\n".join(lines)
         + f"{rule}\n"
     )
 
 
+def render_error_feedback(failed_sql, error_message):
+    """
+    Tell the model its previous attempt failed, and why.
+
+    A second attempt that can see the database's own error ("Invalid column
+    name 'District'") usually either fixes the column or correctly concludes
+    the schema cannot answer the question.
+    """
+    if not failed_sql:
+        return ""
+    rule = "=" * 60
+    return (
+        f"\n\n{rule}\nYOUR PREVIOUS ATTEMPT FAILED — FIX IT\n{rule}\n"
+        f"This query was rejected by SQL Server:\n{failed_sql}\n\n"
+        f"Error:\n{error_message}\n\n"
+        "Write a corrected query. Rules:\n"
+        "- Use ONLY columns that appear in the Database Schema above. If the error "
+        "says a column is invalid, that column does not exist — do not rename it, "
+        "do not guess a similar one.\n"
+        "- If the schema genuinely cannot answer the question, return exactly:\n"
+        "    SELECT 'SCHEMA_INSUFFICIENT' AS Error\n"
+        f"{rule}\n"
+    )
+
+
 def generate_tsql(question, schema_text, business_rules="", model=None,
                   db_identifier=None, dynamic_rules="", examples_text="",
-                  history=None):
+                  history=None, error_feedback=""):
     # Skills are gated on the question, the schema actually supplied, and the
     # connected database — see skills.py.
     rules_text = load_skills(
@@ -64,6 +110,9 @@ def generate_tsql(question, schema_text, business_rules="", model=None,
 
     # Prior turns, so follow-up questions resolve their references.
     rules_text += render_history(history)
+
+    # A failed first attempt, so the retry can see the database's own error.
+    rules_text += error_feedback
 
     # Per-database rules configured by an admin, injected alongside the skills
     # rather than discarded.

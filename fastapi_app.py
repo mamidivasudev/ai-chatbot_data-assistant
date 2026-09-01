@@ -42,8 +42,9 @@ from pydantic import BaseModel
 from mssql_connector import connect_mssql
 from mssql_schema_reader import get_all_tables, get_selected_schema_text, get_table_metadata
 from schema_profiler import profile_and_render, profile_and_render_cached
-from mssql_sql_generator import generate_tsql, generate_answer_summary
+from mssql_sql_generator import generate_tsql, generate_answer_summary, render_error_feedback
 from mssql_executor import validate_tsql, execute_tsql
+from sql_columns import find_unknown_columns
 import skills as skills_registry
 from skills import describe_active_skills
 from db_privileges import enforce_read_only, describe as describe_privileges
@@ -139,9 +140,19 @@ app = FastAPI(
     docs_url="/docs",
 )
 
+# The deployed origin, plus localhost on any port so the Angular dev server
+# (localhost:5200) can reach the API. Without the localhost arm a JSON POST from
+# the dev UI fails its preflight with "Disallowed CORS origin", which reaches the
+# browser as a bare network error carrying no message to display.
+# Override with CORS_ORIGIN_REGEX to tighten or widen this per deployment.
+CORS_ORIGIN_REGEX = os.environ.get(
+    "CORS_ORIGIN_REGEX",
+    r"https?://((.*\.)?satragroup\.in|localhost(:\d+)?|127\.0\.0\.1(:\d+)?)",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https?://(.*\.)?satragroup\.in",
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -932,6 +943,32 @@ def check_db_status(environment: str = "default"):
     except Exception as e:
         return {"is_configured": True, "is_connected": False, "message": f"Connection failed: {str(e)}"}
 
+def _is_schema_insufficient(columns, rows):
+    """The sentinel the prompt asks for when the schema cannot answer."""
+    if not rows:
+        return False
+    try:
+        return any("SCHEMA_INSUFFICIENT" in str(v) for row in rows[:1] for v in row)
+    except Exception:
+        return False
+
+
+def _unanswerable(session_id, question, sql_query, message):
+    """
+    A normal, quiet answer instead of an error.
+
+    This is a chatbot: a caller should get a sentence it can display, not an
+    ODBC exception naming columns and drivers. The real error is in the log.
+    """
+    return {
+        "question": question,
+        "sql": sql_query,
+        "answer": message,
+        "row_count": 0,
+        "session_id": session_id,
+    }
+
+
 @app.post("/fetch-answer")
 def ask_global_db_query(request: GlobalQuestionRequest):
     question = request.question.strip()
@@ -1038,21 +1075,76 @@ def ask_global_db_query(request: GlobalQuestionRequest):
         )
         if not sql_query:
              raise HTTPException(status_code=500, detail="Failed to generate SQL.")
-             
-        is_safe, reason = validate_tsql(sql_query)
-        if not is_safe:
-             raise HTTPException(status_code=400, detail=f"Unsafe query blocked: {reason}")
-             
-        logger.info(f"Executing SQL: {sql_query}")
-        try:
-            columns, rows = execute_tsql(conn, sql_query)
-        except Exception as e:
-             raise HTTPException(status_code=400, detail=f"SQL Execution Error: {e}")
-             
+
+        # One self-correcting retry: show the model the database's own error so
+        # it can fix the column or conclude the schema cannot answer. Raw driver
+        # text is never returned to the caller — only logged.
+        columns, rows = None, None
+        for attempt in (1, 2):
+            is_safe, reason = validate_tsql(sql_query)
+            if not is_safe:
+                logger.warning("Blocked generated query: %s | %s", reason, sql_query)
+                return _unanswerable(session_id, question, sql_query,
+                                     "That request could not be answered safely.")
+
+            # Catch hallucinated columns before the database sees them. The
+            # driver's own message names columns and drivers, and must not
+            # reach the caller.
+            unknown = find_unknown_columns(sql_query, schema_text)
+            if unknown:
+                pseudo_error = (
+                    f"Invalid column name(s): {', '.join(unknown)}. "
+                    "These columns do not exist in the schema provided."
+                )
+                logger.warning("Unknown columns %s (attempt %d): %s", unknown, attempt, sql_query)
+                if attempt == 2:
+                    return _unanswerable(
+                        session_id, question, sql_query,
+                        "That information is not available in the selected tables.",
+                    )
+                sql_query = generate_tsql(
+                    question, schema_text,
+                    model=STATIC_MODEL_NAME,
+                    db_identifier=db_identifier_env,
+                    dynamic_rules=dynamic_rules,
+                    examples_text=examples_text,
+                    history=history,
+                    error_feedback=render_error_feedback(sql_query, pseudo_error),
+                )
+                continue
+
+            logger.info("Executing SQL (attempt %d): %s", attempt, sql_query)
+            try:
+                columns, rows = execute_tsql(conn, sql_query)
+                break
+            except Exception as exc:
+                logger.warning("SQL failed (attempt %d): %s | %s", attempt, exc, sql_query)
+                if attempt == 2:
+                    return _unanswerable(
+                        session_id, question, sql_query,
+                        "That information is not available in the selected tables.",
+                    )
+                sql_query = generate_tsql(
+                    question, schema_text,
+                    model=STATIC_MODEL_NAME,
+                    db_identifier=db_identifier_env,
+                    dynamic_rules=dynamic_rules,
+                    examples_text=examples_text,
+                    history=history,
+                    error_feedback=render_error_feedback(sql_query, str(exc)),
+                )
+
+        # The model's explicit "this schema cannot answer that" sentinel.
+        if _is_schema_insufficient(columns, rows):
+            return _unanswerable(
+                session_id, question, sql_query,
+                "That information is not available in the selected tables.",
+            )
+
         logger.info("Generating natural language answer...")
         answer = generate_answer_summary(question, sql_query, columns, rows, model=STATIC_MODEL_NAME, simple_mode=True)
-        
-        add_db_chat_turn(session_id, question, sql_query, answer)
+
+        add_db_chat_turn(session_id, question, sql_query, answer, columns=columns, rows=rows)
 
         # Provenance is logged server-side on every request, so a wrong answer
         # can still be traced to the database that produced it — but it is not
@@ -1125,45 +1217,185 @@ class SaveRulesRequest(BaseModel):
     requires_tables: list[str] = []
     priority: int = 200
 
+class GenerateSqlRequest(BaseModel):
+    environment: str = "default"
+    question: str
+
+
+@app.post("/admin/generate-sql")
+def admin_generate_sql(req: GenerateSqlRequest):
+    """
+    Generate SQL for a question WITHOUT executing it.
+
+    Feeds the rule editor: an admin types the question that went wrong, gets back
+    the SQL SatBot currently produces for it, corrects that SQL, and drafts a rule
+    from the pair. Nothing is run against the database, so a wrong draft query
+    costs nothing.
+    """
+    question = req.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+
+    if not os.path.exists(ADMIN_CONFIG_FILE):
+        raise HTTPException(status_code=400, detail="Database is not configured.")
+
+    try:
+        with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
+            config = json.load(f).get(req.environment)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read admin config: {e}")
+
+    if not config:
+        raise HTTPException(status_code=400, detail=f"Environment '{req.environment}' not found.")
+
+    tables_tuple = [tuple(t) for t in (config.get("tables") or [])]
+    if not tables_tuple:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Environment '{req.environment}' has no tables configured.",
+        )
+
+    conn = None
+    try:
+        cipher = get_cipher()
+        try:
+            password = cipher.decrypt(config["password"].encode("utf-8")).decode("utf-8")
+        except Exception:
+            password = config["password"]
+
+        conn = connect_mssql(
+            server=config["server"],
+            database=config["database"],
+            auth_mode=config.get("auth_mode", "SQL Server Authentication"),
+            username=config["username"],
+            password=password,
+            driver=config.get("driver", "ODBC Driver 17 for SQL Server"),
+        )
+
+        schema_text = get_selected_schema_text(conn, tables_tuple)
+        dynamic_rules, _ = profile_and_render_cached(
+            conn, tables_tuple, get_table_metadata,
+            cache_key=(config["server"], config["database"], tuple(map(tuple, tables_tuple))),
+        )
+        db_identifier = f"{req.environment}_MS SQL_{config['database']}"
+        examples_text, _ = load_examples_for_prompt(
+            question, db_identifier=db_identifier, schema_text=schema_text
+        )
+
+        sql = generate_tsql(
+            question, schema_text,
+            model=STATIC_MODEL_NAME,
+            db_identifier=db_identifier,
+            dynamic_rules=dynamic_rules,
+            examples_text=examples_text,
+        )
+
+        # Reported, not enforced: the admin is about to correct this SQL by hand,
+        # so an unknown column is information rather than a failure.
+        unknown = find_unknown_columns(sql, schema_text)
+        return {
+            "question": question,
+            "sql": sql,
+            "database": config["database"],
+            "tables": [".".join(t) for t in tables_tuple],
+            "unknown_columns": unknown,
+            "warning": (
+                f"References columns not in the selected tables: {', '.join(unknown)}"
+                if unknown else ""
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("generate-sql failed: %s", e)
+        raise HTTPException(status_code=500, detail="Could not generate SQL for that question.")
+    finally:
+        if conn:
+            conn.close()
+
+
 @app.post("/admin/generate-rule")
 def admin_generate_rule(req: GenerateRuleRequest):
-    prompt = f"""You are a database business logic expert. 
-Given an Example Question and the Correct SQL Query that answers it, extract the underlying business rule or logic into a single, concise English sentence.
+    """
+    Draft a rule from a worked example, for an admin to review before saving.
 
-You must return ONLY a valid JSON object with EXACTLY these three keys:
-1. "generated_rule": The extracted business rule in plain English.
-2. "skill_name": A short, 2-4 word title for this rule.
-3. "keywords": A list of 3-5 important words from the question that should trigger this rule.
+    A draft only — nothing is written to skills.json here. The earlier version of
+    this prompt asked for "the underlying business rule", and reliably produced a
+    restatement of the question ("Count the total number of roads"), which as a
+    saved rule fires on most questions and teaches the model nothing. This one
+    demands a reusable convention, shows what a non-rule looks like, and is
+    explicitly allowed to return nothing when the query holds no convention at all.
+    """
+    prompt = f"""You extract REUSABLE business rules for a text-to-SQL assistant.
 
-Example JSON output:
+You are given a question and the SQL that correctly answers it. Your job is NOT to
+describe what the query does. Your job is to state the non-obvious CONVENTION a
+future query would have to know — something that is true of this database but
+cannot be guessed from column names alone.
+
+Examples of real rules:
+  "Length is stored in metres; divide by 1000.0 to report kilometres."
+  "State Highways are filtered as RoadClass = 'SH', never the full name."
+  "Rows with RoadCode LIKE 'N%' are seed data and must be excluded from totals."
+
+Examples of NON-rules (never produce these):
+  "Count the total number of roads."          <- restates the question
+  "Retrieve the top 7 longest roads."         <- restates the question
+  "Select roads from the RoadMaster table."   <- obvious from the schema
+
+If the SQL contains NO such convention — if it is a plain query any competent
+person would write from the schema — return "generated_rule": "" and nothing else.
+
+Return ONLY a JSON object:
 {{
-  "generated_rule": "Busiest roads means AADT > 10000.",
-  "skill_name": "Traffic Rules",
-  "keywords": ["busiest", "traffic", "heavy"]
+  "generated_rule": "one sentence, imperative, naming literal columns/values; or empty string",
+  "skill_name": "2-4 word title",
+  "keywords": ["2-4 SPECIFIC trigger words"],
+  "requires_tables": ["tables the rule references"]
 }}
 
-Example Question:
+Keywords must be specific to this rule. NEVER use generic words that appear in most
+questions: road, roads, data, table, count, total, show, list, get, all, many.
+
+Question:
 {req.question}
 
-Correct SQL Query:
+SQL:
 {req.sql}
 """
     try:
         response_text = ask_ollama(prompt, model=STATIC_MODEL_NAME).strip()
-        
-        # In case the LLM wraps it in markdown code blocks
+
+        # The model still wraps JSON in a markdown fence often enough to handle.
         if response_text.startswith("```json"):
             response_text = response_text[7:]
         if response_text.startswith("```"):
             response_text = response_text[3:]
         if response_text.endswith("```"):
             response_text = response_text[:-3]
-            
-        import json
+
         result = json.loads(response_text.strip())
-        return result
+
+        rule = str(result.get("generated_rule") or "").strip()
+        # "No convention here" is a useful answer, not a failure — say so plainly
+        # rather than handing back an empty box the admin has to interpret.
+        return {
+            "generated_rule": rule,
+            "skill_name": str(result.get("skill_name") or "").strip(),
+            "keywords": [str(k).strip() for k in (result.get("keywords") or []) if str(k).strip()],
+            "requires_tables": [
+                str(t).strip() for t in (result.get("requires_tables") or []) if str(t).strip()
+            ],
+            "has_rule": bool(rule),
+            "message": (
+                "" if rule else
+                "This query follows no special convention — it needs no rule. "
+                "Save it as a verified example instead."
+            ),
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("generate-rule failed: %s", e)
+        raise HTTPException(status_code=500, detail="Could not draft a rule from that example.")
 
 SKILLS_FILE = skills_registry.SKILLS_FILE
 
@@ -1329,6 +1561,119 @@ def preview_query_examples(question: str, database_identifier: str = "", top_k: 
         "question": question,
         "examples": retrieve(question, database_identifier or None, top_k),
     }
+
+
+# ─────────────────────────────────────────────
+# Business Rules (Skills) — CRUD
+#
+# skills.json is the single source. Scope "*" applies to every database; a
+# database name (e.g. "Hims_Zrams") limits the rule to that database.
+# ─────────────────────────────────────────────
+class SkillCreate(BaseModel):
+    name: str = "Custom Rule"
+    instruction: str
+    scope: str = "*"
+    keywords: list[str] = []
+    requires_tables: list[str] = []
+    priority: int = 200
+    enabled: bool = True
+    # "always" | "any" | "all". Inferred from keywords when omitted.
+    match: Optional[str] = None
+    # Optional explicit id; a readable slug is generated from the name otherwise.
+    id: Optional[str] = None
+
+
+class SkillUpdate(BaseModel):
+    """Every field optional — only what is sent gets changed."""
+    name: Optional[str] = None
+    instruction: Optional[str] = None
+    scope: Optional[str] = None
+    keywords: Optional[list[str]] = None
+    requires_tables: Optional[list[str]] = None
+    priority: Optional[int] = None
+    enabled: Optional[bool] = None
+    match: Optional[str] = None
+
+
+@app.get("/admin/skills")
+def list_all_skills(scope: Optional[str] = None, database_identifier: Optional[str] = None):
+    """
+    List skills.
+
+    `scope` filters to one exact scope. `database_identifier` instead returns
+    everything that would apply to that database (its scope plus the global one).
+    """
+    skills = skills_registry.all_skills()
+
+    if scope:
+        skills = [s for s in skills if s.get("scope") == scope]
+    elif database_identifier:
+        applicable = set(skills_registry.resolve_scopes(database_identifier))
+        skills = [s for s in skills if s.get("scope") in applicable]
+
+    return {
+        "count": len(skills),
+        "scopes": skills_registry.list_scopes(),
+        "skills": skills,
+    }
+
+
+@app.get("/admin/skills/scopes")
+def list_skill_scopes():
+    doc = skills_registry.read_document()
+    return {
+        "scopes": [
+            {"scope": scope, "skill_count": len(items)}
+            for scope, items in sorted(doc.get("scopes", {}).items())
+        ]
+    }
+
+
+@app.post("/admin/skills", status_code=201)
+def create_skill_endpoint(req: SkillCreate):
+    try:
+        return skills_registry.create_skill(
+            scope=req.scope, skill_id=req.id, name=req.name,
+            instruction=req.instruction, keywords=req.keywords,
+            requires_tables=req.requires_tables, priority=req.priority,
+            enabled=req.enabled, match=req.match,
+        )
+    except skills_registry.DuplicateSkillId as exc:
+        raise HTTPException(status_code=409, detail=f"A skill with id '{exc}' already exists.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/admin/skills/{skill_id}")
+def get_skill_endpoint(skill_id: str):
+    try:
+        scope, skill = skills_registry.get_skill(skill_id)
+        return dict(skill, scope=scope)
+    except skills_registry.SkillNotFound:
+        raise HTTPException(status_code=404, detail=f"No skill with id '{skill_id}'.")
+
+
+@app.put("/admin/skills/{skill_id}")
+@app.patch("/admin/skills/{skill_id}")
+def update_skill_endpoint(skill_id: str, req: SkillUpdate):
+    changes = req.model_dump(exclude_unset=True) if hasattr(req, "model_dump") else req.dict(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="No fields supplied to update.")
+    try:
+        return skills_registry.update_skill(skill_id, changes)
+    except skills_registry.SkillNotFound:
+        raise HTTPException(status_code=404, detail=f"No skill with id '{skill_id}'.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.delete("/admin/skills/{skill_id}")
+def delete_skill_endpoint(skill_id: str):
+    try:
+        removed = skills_registry.delete_skill(skill_id)
+        return {"status": "deleted", "skill": removed}
+    except skills_registry.SkillNotFound:
+        raise HTTPException(status_code=404, detail=f"No skill with id '{skill_id}'.")
 
 
 @app.get("/admin/preview-skills")

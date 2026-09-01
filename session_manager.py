@@ -75,15 +75,39 @@ def get_db_chat_history(session_id: str) -> list:
     return entry["history"]
 
 
+MAX_RESULT_ROWS_KEPT = 5
+MAX_CELL_CHARS = 80
+
+
 def add_db_chat_turn(session_id: str, question: str, sql: str, answer: str,
-                     max_history: int = MAX_DB_HISTORY):
+                     columns=None, rows=None, max_history: int = MAX_DB_HISTORY):
+    """
+    Record one turn, including a preview of the rows it returned.
+
+    The rows matter: a follow-up like "chainages of this road" needs the key
+    value from the previous result (RoadCode = 'N0001'). Keeping only the prose
+    answer left the model with no key, and it invented one.
+    """
     cleanup_sessions()
     if not session_id:
         return
+
+    preview_rows = []
+    for row in (rows or [])[:MAX_RESULT_ROWS_KEPT]:
+        preview_rows.append([
+            (str(v)[:MAX_CELL_CHARS] if v is not None else None) for v in row
+        ])
+
     entry = db_chat_sessions.setdefault(
         session_id, {"history": [], "timestamp": time.time()}
     )
-    entry["history"].append({"question": question, "sql": sql, "answer": answer})
+    entry["history"].append({
+        "question": question,
+        "sql": sql,
+        "answer": answer,
+        "columns": list(columns or []),
+        "rows": preview_rows,
+    })
     entry["timestamp"] = time.time()
     if len(entry["history"]) > max_history:
         entry["history"] = entry["history"][-max_history:]
