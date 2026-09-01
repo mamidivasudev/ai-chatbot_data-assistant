@@ -63,6 +63,18 @@ def _get_audit_conn():
     return pyodbc.connect(conn_str, timeout=5)
 
 
+import logging.handlers
+
+# Setup rotating file logger for fallback audit logs
+audit_file_logger = logging.getLogger("audit_file")
+audit_file_logger.setLevel(logging.INFO)
+# Max 5MB per file, keep 3 backups
+file_handler = logging.handlers.RotatingFileHandler(
+    "audit.log", maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+)
+audit_file_logger.addHandler(file_handler)
+audit_file_logger.propagate = False
+
 def log_query(
     user_id: str,
     question: str,
@@ -88,7 +100,7 @@ def log_query(
         except Exception as exc:
             logger.error("Audit DB write failed, falling back to file log: %s", exc)
 
-    # Fallback: append to local audit.log
+    # Fallback: append to local rotating audit.log
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "user_id": user_id,
@@ -98,5 +110,4 @@ def log_query(
         "sql": sql,
         "row_count": row_count,
     }
-    with open("audit.log", "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    audit_file_logger.info(json.dumps(entry))

@@ -95,6 +95,15 @@ def get_table_columns(conn, schema, table):
     ]
 
 
+def get_table_metadata(conn, schema, table):
+    """Columns, primary keys and foreign keys for one table, in one call."""
+    return {
+        "columns": get_table_columns(conn, schema, table),
+        "pks": get_primary_keys(conn, schema, table),
+        "fks": get_foreign_keys(conn, schema, table),
+    }
+
+
 def get_table_schema_text(conn, schema, table):
     """Build a compact schema string for one table (for AI prompt)."""
     columns = get_table_columns(conn, schema, table)

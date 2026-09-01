@@ -18,6 +18,7 @@ Run:
 """
 
 import os
+import uuid
 import logging
 from datetime import datetime, timezone
 import tempfile
@@ -30,6 +31,8 @@ os.environ["NO_PROXY"] = "127.0.0.1,localhost"
 # ---------------------------------
 
 
+from file_reader import read_project
+from search_engine import search_files
 from fastapi import Depends, FastAPI, HTTPException, status, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -39,9 +42,23 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from mssql_connector import connect_mssql
-from mssql_schema_reader import get_all_tables, get_selected_schema_text
-from mssql_sql_generator import generate_tsql, generate_answer_summary
+from mssql_schema_reader import get_all_tables, get_selected_schema_text, get_table_metadata
+from schema_profiler import profile_and_render, profile_and_render_cached
+from mssql_sql_generator import generate_tsql, generate_answer_summary, render_error_feedback
 from mssql_executor import validate_tsql, execute_tsql
+from sql_columns import find_unknown_columns
+import skills as skills_registry
+from skills import describe_active_skills
+from db_privileges import enforce_read_only, describe as describe_privileges
+from query_library import (
+    add_examples,
+    parse_upload,
+    load_library,
+    save_library,
+    library_stats,
+    retrieve,
+    load_examples_for_prompt,
+)
 from ollama_client import list_ollama_models, ask_ollama, ask_ollama_stream
 from audit_logger import log_query   # see audit_logger.py
 from session_manager import (
@@ -49,16 +66,47 @@ from session_manager import (
     get_session,
     remove_session,
     get_file_session_history,
-    add_file_session_history
+    add_file_session_history,
+    get_db_chat_history,
+    add_db_chat_turn,
+    clear_db_chat_history,
 )
-from file_reader import read_project
-from search_engine import search_files
 from cryptography.fernet import Fernet
+
+# v2_rag_engine pulls in chromadb, sentence-transformers and torch, and builds a
+# cross-encoder on import. Loading that eagerly costs a slow startup and makes
+# the database endpoints unavailable on a host without the RAG stack installed,
+# so it is imported on first use instead.
+_v2_rag_engine = None
+
+
+def rag_engine():
+    """Import v2_rag_engine on demand; 503 if the RAG dependencies are absent."""
+    global _v2_rag_engine
+    if _v2_rag_engine is None:
+        try:
+            import v2_rag_engine as _module
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Document/RAG features are unavailable on this host: "
+                    f"{exc}. Install chromadb, sentence-transformers, python-docx "
+                    "and pypdf to enable them."
+                ),
+            )
+        _v2_rag_engine = _module
+    return _v2_rag_engine
 # ─────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production")
 ALGORITHM = "HS256"
+
+# Operator-only switch for /fetch-answer diagnostics (server, database, tables,
+# raw rows, active skills). Leave unset in production: the answer payload should
+# never carry infrastructure details to a caller.
+FETCH_ANSWER_DEBUG = os.environ.get("FETCH_ANSWER_DEBUG", "").strip().lower() in ("1", "true", "yes")
 
 ENCRYPTION_KEY_FILE = "encryption_secret.key"
 
@@ -94,9 +142,19 @@ app = FastAPI(
     docs_url="/docs",
 )
 
+# The deployed origin, plus localhost on any port so the Angular dev server
+# (localhost:5200) can reach the API. Without the localhost arm a JSON POST from
+# the dev UI fails its preflight with "Disallowed CORS origin", which reaches the
+# browser as a bare network error carrying no message to display.
+# Override with CORS_ORIGIN_REGEX to tighten or widen this per deployment.
+CORS_ORIGIN_REGEX = os.environ.get(
+    "CORS_ORIGIN_REGEX",
+    r"https?://((.*\.)?satragroup\.in|localhost(:\d+)?|127\.0\.0\.1(:\d+)?)",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https?://(.*\.)?satragroup\.in",
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -131,6 +189,7 @@ def verify_token():
 # Request / Response models
 # ─────────────────────────────────────────────
 class ConnectRequest(BaseModel):
+    environment: str = "default"
     server: str
     database: str
     auth_mode: str                    # "Windows Authentication" | "SQL Server Authentication"
@@ -1111,16 +1170,36 @@ async def serve_v2_ui():
 
 
 # --- ADDED FOR ADMIN GLOBAL CONFIG API ---
-from history_manager import get_business_rules
+# from history_manager import get_business_rules (removed)
 
 ADMIN_CONFIG_FILE = "admin_db_config.json"
 STATIC_MODEL_NAME = "qwen2.5-coder:7b"
 
 class AdminDbConfigRequest(BaseModel):
+    environment: str = "default"
     tables: list[str]
 
 class GlobalQuestionRequest(BaseModel):
+    environment: str = "default"
     question: str
+    # Pass the same session_id across turns so follow-ups ("name of it") resolve.
+    # Omit it and the request is treated as a fresh, standalone question.
+    session_id: Optional[str] = None
+
+
+# /env-list is an alias for /admin/environments — same handler, same response —
+# so callers using either path get identical results.
+@app.get("/env-list")
+@app.get("/admin/environments")
+def get_all_environments():
+    if not os.path.exists(ADMIN_CONFIG_FILE):
+        return {"environments": []}
+    try:
+        with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return {"environments": list(data.keys())}
+    except Exception:
+        return {"environments": []}
 
 @app.post("/admin/save-db-config")
 def save_admin_db_config(req: AdminDbConfigRequest):
@@ -1133,6 +1212,9 @@ def save_admin_db_config(req: AdminDbConfigRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read existing configuration: {e}")
 
+    if req.environment not in config_data:
+        raise HTTPException(status_code=400, detail=f"Environment '{req.environment}' not found. Please connect first.")
+
     parsed_tables = []
     for t in req.tables:
         try:
@@ -1141,7 +1223,7 @@ def save_admin_db_config(req: AdminDbConfigRequest):
         except Exception:
             raise HTTPException(status_code=400, detail=f"Invalid table format: {t}. Must be 'schema.table'")
 
-    config_data["tables"] = parsed_tables
+    config_data[req.environment]["tables"] = parsed_tables
 
     try:
         with open(ADMIN_CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -1152,25 +1234,31 @@ def save_admin_db_config(req: AdminDbConfigRequest):
     return {"status": "success", "message": "Global configuration saved successfully."}
 
 @app.get("/admin/get-db-config")
-def get_admin_db_config():
+def get_admin_db_config(environment: str = "default"):
     if not os.path.exists(ADMIN_CONFIG_FILE):
         return {"status": "not_configured", "config": None}
     try:
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            config = json.load(f)
+            config_data = json.load(f)
+            config = config_data.get(environment)
+            if not config:
+                return {"status": "not_configured", "config": None}
             config["password"] = "********"
             return {"status": "configured", "config": config}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read configuration: {e}")
 
 @app.get("/admin/check-db-status")
-def check_db_status():
+def check_db_status(environment: str = "default"):
     if not os.path.exists(ADMIN_CONFIG_FILE):
         return {"is_configured": False, "is_connected": False, "message": "No database configuration found."}
         
     try:
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            config = json.load(f)
+            config_data = json.load(f)
+            config = config_data.get(environment)
+            if not config:
+                return {"is_configured": False, "is_connected": False, "message": f"Environment '{environment}' not configured."}
             
         cipher = get_cipher()
         try:
@@ -1186,11 +1274,55 @@ def check_db_status():
             password=decrypted_password,
             driver=config.get("driver", "ODBC Driver 17 for SQL Server")
         )
+        privileges = enforce_read_only(
+            conn,
+            server=config["server"],
+            database=config["database"],
+            username=config.get("username") or "",
+            strict=False,          # status must report the problem, not fail on it
+        )
         conn.close()
-        return {"is_configured": True, "is_connected": True, "message": "Database is configured and connection is successful."}
+
+        return {
+            "is_configured": True,
+            "is_connected": True,
+            "message": "Database is configured and connection is successful.",
+            "login_name": privileges.get("login_name"),
+            "read_only": (
+                None if not privileges.get("known") else not privileges["write_capable"]
+            ),
+            "write_grants": privileges.get("grants", []),
+            "privilege_message": describe_privileges(privileges),
+        }
         
     except Exception as e:
         return {"is_configured": True, "is_connected": False, "message": f"Connection failed: {str(e)}"}
+
+def _is_schema_insufficient(columns, rows):
+    """The sentinel the prompt asks for when the schema cannot answer."""
+    if not rows:
+        return False
+    try:
+        return any("SCHEMA_INSUFFICIENT" in str(v) for row in rows[:1] for v in row)
+    except Exception:
+        return False
+
+
+def _unanswerable(session_id, question, sql_query, message):
+    """
+    A normal, quiet answer instead of an error.
+
+    This is a chatbot: a caller should get a sentence it can display, not an
+    ODBC exception naming columns and drivers. The real error is in the log.
+    """
+    return {
+        "question": question,
+        "sql": sql_query,
+        "answer": message,
+        "row_count": 0,
+        "session_id": session_id,
+    }
+
 
 @app.post("/fetch-answer")
 def ask_global_db_query(request: GlobalQuestionRequest):
@@ -1203,7 +1335,12 @@ def ask_global_db_query(request: GlobalQuestionRequest):
         
     try:
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            config = json.load(f)
+            config_data = json.load(f)
+            config = config_data.get(request.environment)
+            if not config:
+                raise HTTPException(status_code=400, detail=f"Environment '{request.environment}' not found.")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read admin config: {e}")
         
@@ -1225,36 +1362,187 @@ def ask_global_db_query(request: GlobalQuestionRequest):
             driver=config.get("driver", "ODBC Driver 17 for SQL Server")
         )
         
+        # The login must not be able to write. With REQUIRE_READONLY_DB=1 this
+        # refuses the request outright; otherwise it warns once per connection.
+        privileges = enforce_read_only(
+            conn,
+            server=config["server"],
+            database=config["database"],
+            username=config.get("username") or "",
+        )
+
         logger.info("Extracting schema...")
         tables_tuple = [tuple(t) for t in config["tables"]]
+        if not tables_tuple:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Environment '{request.environment}' has no tables configured. "
+                    "Call /admin/save-db-config to select tables before asking questions."
+                ),
+            )
         schema_text = get_selected_schema_text(conn, tables_tuple)
-        
-        db_identifier = f"MS SQL_{config['database']}"
-        business_rules = get_business_rules(db_identifier)
-        
+
+        # Rules derived from the ticked tables themselves, so a newly selected
+        # table is usable without anyone hand-authoring a rule for it. Cached:
+        # the DISTINCT/GROUP BY probes are the same on every question.
+        dynamic_rules, schema_profile = profile_and_render_cached(
+            conn, tables_tuple, get_table_metadata,
+            cache_key=(config["server"], config["database"], tuple(map(tuple, tables_tuple))),
+        )
+
+        db_identifier_env = f"{request.environment}_MS SQL_{config['database']}"
+
+        # Record which database and skills answered this question — without
+        # this, a mis-pointed environment produces a plausible wrong number
+        # with no way to tell after the fact.
+        active_skills = describe_active_skills(
+            question, schema_text=schema_text, db_identifier=db_identifier_env
+        )
+
+        # Worked examples from the verified query library, filtered to this
+        # database and to tables present in the schema.
+        examples_text, examples_used = load_examples_for_prompt(
+            question, db_identifier=db_identifier_env, schema_text=schema_text
+        )
+
+        # Prior turns for this session, so a follow-up can resolve "it"/"that".
+        session_id = request.session_id or str(uuid.uuid4())
+        history = get_db_chat_history(request.session_id) if request.session_id else []
+        logger.info(
+            "Answering against %s/%s (env=%s) tables=%s skills=%s",
+            config["server"],
+            config["database"],
+            request.environment,
+            tables_tuple,
+            [s["id"] for s in active_skills],
+        )
+
         logger.info("Generating SQL...")
-        sql_query = generate_tsql(question, schema_text, business_rules, model=STATIC_MODEL_NAME)
+        sql_query = generate_tsql(
+            question,
+            schema_text,
+            model=STATIC_MODEL_NAME,
+            db_identifier=db_identifier_env,
+            dynamic_rules=dynamic_rules,
+            examples_text=examples_text,
+            history=history,
+        )
         if not sql_query:
              raise HTTPException(status_code=500, detail="Failed to generate SQL.")
-             
-        is_safe, reason = validate_tsql(sql_query)
-        if not is_safe:
-             raise HTTPException(status_code=400, detail=f"Unsafe query blocked: {reason}")
-             
-        logger.info(f"Executing SQL: {sql_query}")
-        try:
-            columns, rows = execute_tsql(conn, sql_query)
-        except Exception as e:
-             raise HTTPException(status_code=400, detail=f"SQL Execution Error: {e}")
-             
+
+        # One self-correcting retry: show the model the database's own error so
+        # it can fix the column or conclude the schema cannot answer. Raw driver
+        # text is never returned to the caller — only logged.
+        columns, rows = None, None
+        for attempt in (1, 2):
+            is_safe, reason = validate_tsql(sql_query)
+            if not is_safe:
+                logger.warning("Blocked generated query: %s | %s", reason, sql_query)
+                return _unanswerable(session_id, question, sql_query,
+                                     "That request could not be answered safely.")
+
+            # Catch hallucinated columns before the database sees them. The
+            # driver's own message names columns and drivers, and must not
+            # reach the caller.
+            unknown = find_unknown_columns(sql_query, schema_text)
+            if unknown:
+                pseudo_error = (
+                    f"Invalid column name(s): {', '.join(unknown)}. "
+                    "These columns do not exist in the schema provided."
+                )
+                logger.warning("Unknown columns %s (attempt %d): %s", unknown, attempt, sql_query)
+                if attempt == 2:
+                    return _unanswerable(
+                        session_id, question, sql_query,
+                        "That information is not available in the selected tables.",
+                    )
+                sql_query = generate_tsql(
+                    question, schema_text,
+                    model=STATIC_MODEL_NAME,
+                    db_identifier=db_identifier_env,
+                    dynamic_rules=dynamic_rules,
+                    examples_text=examples_text,
+                    history=history,
+                    error_feedback=render_error_feedback(sql_query, pseudo_error),
+                )
+                continue
+
+            logger.info("Executing SQL (attempt %d): %s", attempt, sql_query)
+            try:
+                columns, rows = execute_tsql(conn, sql_query)
+                break
+            except Exception as exc:
+                logger.warning("SQL failed (attempt %d): %s | %s", attempt, exc, sql_query)
+                if attempt == 2:
+                    return _unanswerable(
+                        session_id, question, sql_query,
+                        "That information is not available in the selected tables.",
+                    )
+                sql_query = generate_tsql(
+                    question, schema_text,
+                    model=STATIC_MODEL_NAME,
+                    db_identifier=db_identifier_env,
+                    dynamic_rules=dynamic_rules,
+                    examples_text=examples_text,
+                    history=history,
+                    error_feedback=render_error_feedback(sql_query, str(exc)),
+                )
+
+        # The model's explicit "this schema cannot answer that" sentinel.
+        if _is_schema_insufficient(columns, rows):
+            return _unanswerable(
+                session_id, question, sql_query,
+                "That information is not available in the selected tables.",
+            )
+
         logger.info("Generating natural language answer...")
         answer = generate_answer_summary(question, sql_query, columns, rows, model=STATIC_MODEL_NAME, simple_mode=True)
-        
-        return {
+
+        add_db_chat_turn(session_id, question, sql_query, answer, columns=columns, rows=rows)
+
+        # Provenance is logged server-side on every request, so a wrong answer
+        # can still be traced to the database that produced it — but it is not
+        # returned to the caller, where a server IP and raw rows do not belong.
+        logger.info(
+            "answered env=%s server=%s db=%s tables=%s rows=%d skills=%s session=%s",
+            request.environment, config["server"], config["database"],
+            tables_tuple, len(rows), [s["id"] for s in active_skills], session_id,
+        )
+
+        response = {
             "question": question,
             "sql": sql_query,
-            "answer": answer
+            "answer": answer,
+            "row_count": len(rows),
+            "session_id": session_id,
         }
+
+        # Diagnostics are an operator switch, never a caller's choice — a client
+        # must not be able to ask the API to reveal the server IP, table names
+        # or raw rows. Off unless FETCH_ANSWER_DEBUG is set on the host.
+        if FETCH_ANSWER_DEBUG:
+            response["debug"] = {
+                "environment": request.environment,
+                "server": config["server"],
+                "database": config["database"],
+                "tables": [".".join(t) for t in tables_tuple],
+                "active_skills": [s["id"] for s in active_skills],
+                "examples_used": [e["question"] for e in examples_used],
+                "history_turns": len(history),
+                "read_only_connection": (
+                    None if not privileges.get("known") else not privileges["write_capable"]
+                ),
+                "schema_rules": {
+                    "soft_deletes": schema_profile.get("soft_deletes", []),
+                    "joins": schema_profile.get("joins", []),
+                    "enums": schema_profile.get("enums", []),
+                },
+                "columns": columns,
+                "rows": [list(r) for r in rows[:100]],
+            }
+
+        return response
 
     except HTTPException:
         raise
@@ -1273,76 +1561,505 @@ class GenerateRuleRequest(BaseModel):
     sql: str
 
 class SaveRulesRequest(BaseModel):
-    database_identifier: str
     rules_text: str
+    keywords: list[str] = ["*"]
+    skill_name: str = "Custom Rule"
+    # Which databases the rule applies to. "*" is the global scope; use a
+    # database name (e.g. "Hims_Zrams") to keep domain rules off other schemas.
+    scope: str = "*"
+    # Tables the rule references. The rule stays dormant unless all of them are
+    # in the schema handed to the model.
+    requires_tables: list[str] = []
+    priority: int = 200
+
+class GenerateSqlRequest(BaseModel):
+    environment: str = "default"
+    question: str
+
+
+@app.post("/admin/generate-sql")
+def admin_generate_sql(req: GenerateSqlRequest):
+    """
+    Generate SQL for a question WITHOUT executing it.
+
+    Feeds the rule editor: an admin types the question that went wrong, gets back
+    the SQL SatBot currently produces for it, corrects that SQL, and drafts a rule
+    from the pair. Nothing is run against the database, so a wrong draft query
+    costs nothing.
+    """
+    question = req.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+
+    if not os.path.exists(ADMIN_CONFIG_FILE):
+        raise HTTPException(status_code=400, detail="Database is not configured.")
+
+    try:
+        with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
+            config = json.load(f).get(req.environment)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read admin config: {e}")
+
+    if not config:
+        raise HTTPException(status_code=400, detail=f"Environment '{req.environment}' not found.")
+
+    tables_tuple = [tuple(t) for t in (config.get("tables") or [])]
+    if not tables_tuple:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Environment '{req.environment}' has no tables configured.",
+        )
+
+    conn = None
+    try:
+        cipher = get_cipher()
+        try:
+            password = cipher.decrypt(config["password"].encode("utf-8")).decode("utf-8")
+        except Exception:
+            password = config["password"]
+
+        conn = connect_mssql(
+            server=config["server"],
+            database=config["database"],
+            auth_mode=config.get("auth_mode", "SQL Server Authentication"),
+            username=config["username"],
+            password=password,
+            driver=config.get("driver", "ODBC Driver 17 for SQL Server"),
+        )
+
+        schema_text = get_selected_schema_text(conn, tables_tuple)
+        dynamic_rules, _ = profile_and_render_cached(
+            conn, tables_tuple, get_table_metadata,
+            cache_key=(config["server"], config["database"], tuple(map(tuple, tables_tuple))),
+        )
+        db_identifier = f"{req.environment}_MS SQL_{config['database']}"
+        examples_text, _ = load_examples_for_prompt(
+            question, db_identifier=db_identifier, schema_text=schema_text
+        )
+
+        sql = generate_tsql(
+            question, schema_text,
+            model=STATIC_MODEL_NAME,
+            db_identifier=db_identifier,
+            dynamic_rules=dynamic_rules,
+            examples_text=examples_text,
+        )
+
+        # Reported, not enforced: the admin is about to correct this SQL by hand,
+        # so an unknown column is information rather than a failure.
+        unknown = find_unknown_columns(sql, schema_text)
+        return {
+            "question": question,
+            "sql": sql,
+            "database": config["database"],
+            "tables": [".".join(t) for t in tables_tuple],
+            "unknown_columns": unknown,
+            "warning": (
+                f"References columns not in the selected tables: {', '.join(unknown)}"
+                if unknown else ""
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("generate-sql failed: %s", e)
+        raise HTTPException(status_code=500, detail="Could not generate SQL for that question.")
+    finally:
+        if conn:
+            conn.close()
+
 
 @app.post("/admin/generate-rule")
 def admin_generate_rule(req: GenerateRuleRequest):
-    prompt = f"""You are a database business logic expert. 
-Given an Example Question and the Correct SQL Query that answers it, extract the underlying business rule or logic into a single, concise English sentence.
-For example, if the SQL uses "WHERE AADT > 10000", the rule might be "Busiest roads means AADT > 10000."
-Do NOT explain the SQL. Return ONLY the rule itself.
+    """
+    Draft a rule from a worked example, for an admin to review before saving.
 
-Example Question:
+    A draft only — nothing is written to skills.json here. The earlier version of
+    this prompt asked for "the underlying business rule", and reliably produced a
+    restatement of the question ("Count the total number of roads"), which as a
+    saved rule fires on most questions and teaches the model nothing. This one
+    demands a reusable convention, shows what a non-rule looks like, and is
+    explicitly allowed to return nothing when the query holds no convention at all.
+    """
+    prompt = f"""You extract REUSABLE business rules for a text-to-SQL assistant.
+
+You are given a question and the SQL that correctly answers it. Your job is NOT to
+describe what the query does. Your job is to state the non-obvious CONVENTION a
+future query would have to know — something that is true of this database but
+cannot be guessed from column names alone.
+
+Examples of real rules:
+  "Length is stored in metres; divide by 1000.0 to report kilometres."
+  "State Highways are filtered as RoadClass = 'SH', never the full name."
+  "Rows with RoadCode LIKE 'N%' are seed data and must be excluded from totals."
+
+Examples of NON-rules (never produce these):
+  "Count the total number of roads."          <- restates the question
+  "Retrieve the top 7 longest roads."         <- restates the question
+  "Select roads from the RoadMaster table."   <- obvious from the schema
+
+If the SQL contains NO such convention — if it is a plain query any competent
+person would write from the schema — return "generated_rule": "" and nothing else.
+
+Return ONLY a JSON object:
+{{
+  "generated_rule": "one sentence, imperative, naming literal columns/values; or empty string",
+  "skill_name": "2-4 word title",
+  "keywords": ["2-4 SPECIFIC trigger words"],
+  "requires_tables": ["tables the rule references"]
+}}
+
+Keywords must be specific to this rule. NEVER use generic words that appear in most
+questions: road, roads, data, table, count, total, show, list, get, all, many.
+
+Question:
 {req.question}
 
-Correct SQL Query:
+SQL:
 {req.sql}
 """
     try:
-        rule = ask_ollama(prompt, model=STATIC_MODEL_NAME).strip()
-        return {"generated_rule": rule}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        response_text = ask_ollama(prompt, model=STATIC_MODEL_NAME).strip()
 
-@app.get("/admin/get-business-rules")
-def admin_get_business_rules(database_identifier: str):
-    import json
-    import os
-    rules_file = "business_rules.json"
-    if not os.path.exists(rules_file):
-        return {"rules_text": ""}
-        
+        # The model still wraps JSON in a markdown fence often enough to handle.
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+
+        result = json.loads(response_text.strip())
+
+        rule = str(result.get("generated_rule") or "").strip()
+        # "No convention here" is a useful answer, not a failure — say so plainly
+        # rather than handing back an empty box the admin has to interpret.
+        return {
+            "generated_rule": rule,
+            "skill_name": str(result.get("skill_name") or "").strip(),
+            "keywords": [str(k).strip() for k in (result.get("keywords") or []) if str(k).strip()],
+            "requires_tables": [
+                str(t).strip() for t in (result.get("requires_tables") or []) if str(t).strip()
+            ],
+            "has_rule": bool(rule),
+            "message": (
+                "" if rule else
+                "This query follows no special convention — it needs no rule. "
+                "Save it as a verified example instead."
+            ),
+        }
+    except Exception as e:
+        logger.error("generate-rule failed: %s", e)
+        raise HTTPException(status_code=500, detail="Could not draft a rule from that example.")
+
+SKILLS_FILE = skills_registry.SKILLS_FILE
+
+
+def _read_skills_document() -> dict:
+    """Read skills.json, normalising a legacy v1 document to the v2 shape."""
+    if not os.path.exists(SKILLS_FILE):
+        return {"version": 2, "scopes": {}}
+
     try:
-        with open(rules_file, "r", encoding="utf-8") as f:
-            all_rules = json.load(f)
-            
-        return {"rules_text": all_rules.get(database_identifier, "")}
+        with open(SKILLS_FILE, "r", encoding="utf-8") as f:
+            doc = json.load(f)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read rules: {e}")
 
+    if not isinstance(doc, dict):
+        return {"version": 2, "scopes": {}}
+
+    if not isinstance(doc.get("scopes"), dict):
+        # v1: {"global": [...]} — the flat list was applied to every database.
+        doc = {"version": 2, "scopes": {"*": doc.get("global", []) or []}}
+
+    doc.setdefault("version", 2)
+    doc.setdefault("scopes", {})
+    return doc
+
+
+@app.get("/admin/get-business-rules")
+def admin_get_business_rules(database_identifier: str = "", environment: str = "default"):
+    """
+    Rules that would apply to `database_identifier`.
+
+    `rules_text` stays for the existing frontend; `skills` carries the
+    structured registry (scope, keywords, table gating) the v2 format adds.
+    """
+    doc = _read_skills_document()
+
+    identifier = database_identifier or ""
+    applicable = skills_registry.resolve_scopes(identifier) if identifier else ["*"]
+
+    skills_out = []
+    for scope in applicable:
+        for skill in doc["scopes"].get(scope, []):
+            if isinstance(skill, dict):
+                skills_out.append(dict(skill, scope=scope))
+
+    return {
+        "rules_text": "\n".join(s.get("instruction", "") for s in skills_out),
+        "skills": skills_out,
+        "scopes_applied": applicable,
+        "available_scopes": sorted(doc["scopes"].keys()),
+    }
+
+
 @app.post("/admin/save-business-rules")
 def admin_save_business_rules(req: SaveRulesRequest):
-    import json
-    import os
-    rules_file = "business_rules.json"
-    all_rules = {}
-    
-    if os.path.exists(rules_file):
-        try:
-            with open(rules_file, "r", encoding="utf-8") as f:
-                all_rules = json.load(f)
-        except Exception:
-            pass # File might be corrupted, we'll overwrite/fix
-            
-    all_rules[req.database_identifier] = req.rules_text
-    
+    """Append one skill to a scope. Default scope "*" applies to every database."""
+    if not req.rules_text.strip():
+        raise HTTPException(status_code=400, detail="rules_text cannot be empty.")
+
+    doc = _read_skills_document()
+    scope = (req.scope or "*").strip() or "*"
+    doc["scopes"].setdefault(scope, [])
+
+    keywords = [k.strip() for k in req.keywords if k and k.strip() and k.strip() != "*"]
+
+    import uuid
+    new_skill = {
+        "id": str(uuid.uuid4())[:8],
+        "name": req.skill_name,
+        "enabled": True,
+        "priority": req.priority,
+        # No keywords means the rule is unconditional within its scope.
+        "match": "any" if keywords else "always",
+        "keywords": keywords,
+        "requires_tables": [t.strip() for t in req.requires_tables if t and t.strip()],
+        "instruction": req.rules_text.strip(),
+    }
+    doc["scopes"][scope].append(new_skill)
+
     try:
-        with open(rules_file, "w", encoding="utf-8") as f:
-            json.dump(all_rules, f, indent=4)
-        return {"status": "success"}
+        with open(SKILLS_FILE, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=4, ensure_ascii=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save rules: {e}")
 
+    return {"status": "success", "scope": scope, "skill": new_skill}
+
+
+@app.post("/fetch-answer/reset-session")
+def reset_chat_session(session_id: str):
+    """Forget a conversation, so the next question starts with no history."""
+    clear_db_chat_history(session_id)
+    return {"status": "cleared", "session_id": session_id}
+
+
+class QueryExample(BaseModel):
+    question: str
+    sql: str
+    database: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ImportQueriesRequest(BaseModel):
+    examples: list[QueryExample]
+    # Which databases these apply to. "*" means every database.
+    scope: str = "*"
+
+
+@app.post("/admin/query-library/import")
+def import_query_library(req: ImportQueriesRequest):
+    """
+    Bulk-load verified (question, SQL) pairs as few-shot examples.
+
+    Every SQL is checked by the read-only guard; a pair containing a write is
+    rejected with a reason rather than becoming an example the model imitates.
+    """
+    pairs = [e.model_dump() if hasattr(e, "model_dump") else e.dict() for e in req.examples]
+    report = add_examples(pairs, scope=req.scope, source="api")
+    report.pop("added_examples", None)
+    return report
+
+
+@app.post("/admin/query-library/upload")
+async def upload_query_library(file: UploadFile = File(...), scope: str = Form("*")):
+    """Same as /import, but takes the support team's .csv, .xlsx or .json file."""
+    try:
+        content = await file.read()
+        rows = parse_upload(content, file.filename)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read {file.filename}: {e}")
+
+    report = add_examples(rows, scope=scope, source=f"upload:{file.filename}")
+    report.pop("added_examples", None)
+    return report
+
+
+@app.get("/admin/query-library")
+def get_query_library(scope: Optional[str] = None):
+    """List the stored examples, optionally filtered to one scope."""
+    doc = load_library()
+    examples = doc["examples"]
+    if scope:
+        examples = [e for e in examples if e.get("scope") == scope]
+    return {"stats": library_stats(), "examples": examples}
+
+
+@app.delete("/admin/query-library/{example_id}")
+def delete_query_example(example_id: str):
+    doc = load_library()
+    before = len(doc["examples"])
+    doc["examples"] = [e for e in doc["examples"] if e.get("id") != example_id]
+    if len(doc["examples"]) == before:
+        raise HTTPException(status_code=404, detail=f"No example with id '{example_id}'.")
+    save_library(doc)
+    return {"status": "deleted", "id": example_id, "remaining": len(doc["examples"])}
+
+
+@app.get("/admin/query-library/preview")
+def preview_query_examples(question: str, database_identifier: str = "", top_k: int = 4):
+    """Which examples a question would pull in, and their similarity scores."""
+    return {
+        "question": question,
+        "examples": retrieve(question, database_identifier or None, top_k),
+    }
+
+
+# ─────────────────────────────────────────────
+# Business Rules (Skills) — CRUD
+#
+# skills.json is the single source. Scope "*" applies to every database; a
+# database name (e.g. "Hims_Zrams") limits the rule to that database.
+# ─────────────────────────────────────────────
+class SkillCreate(BaseModel):
+    name: str = "Custom Rule"
+    instruction: str
+    scope: str = "*"
+    keywords: list[str] = []
+    requires_tables: list[str] = []
+    priority: int = 200
+    enabled: bool = True
+    # "always" | "any" | "all". Inferred from keywords when omitted.
+    match: Optional[str] = None
+    # Optional explicit id; a readable slug is generated from the name otherwise.
+    id: Optional[str] = None
+
+
+class SkillUpdate(BaseModel):
+    """Every field optional — only what is sent gets changed."""
+    name: Optional[str] = None
+    instruction: Optional[str] = None
+    scope: Optional[str] = None
+    keywords: Optional[list[str]] = None
+    requires_tables: Optional[list[str]] = None
+    priority: Optional[int] = None
+    enabled: Optional[bool] = None
+    match: Optional[str] = None
+
+
+@app.get("/admin/skills")
+def list_all_skills(scope: Optional[str] = None, database_identifier: Optional[str] = None):
+    """
+    List skills.
+
+    `scope` filters to one exact scope. `database_identifier` instead returns
+    everything that would apply to that database (its scope plus the global one).
+    """
+    skills = skills_registry.all_skills()
+
+    if scope:
+        skills = [s for s in skills if s.get("scope") == scope]
+    elif database_identifier:
+        applicable = set(skills_registry.resolve_scopes(database_identifier))
+        skills = [s for s in skills if s.get("scope") in applicable]
+
+    return {
+        "count": len(skills),
+        "scopes": skills_registry.list_scopes(),
+        "skills": skills,
+    }
+
+
+@app.get("/admin/skills/scopes")
+def list_skill_scopes():
+    doc = skills_registry.read_document()
+    return {
+        "scopes": [
+            {"scope": scope, "skill_count": len(items)}
+            for scope, items in sorted(doc.get("scopes", {}).items())
+        ]
+    }
+
+
+@app.post("/admin/skills", status_code=201)
+def create_skill_endpoint(req: SkillCreate):
+    try:
+        return skills_registry.create_skill(
+            scope=req.scope, skill_id=req.id, name=req.name,
+            instruction=req.instruction, keywords=req.keywords,
+            requires_tables=req.requires_tables, priority=req.priority,
+            enabled=req.enabled, match=req.match,
+        )
+    except skills_registry.DuplicateSkillId as exc:
+        raise HTTPException(status_code=409, detail=f"A skill with id '{exc}' already exists.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/admin/skills/{skill_id}")
+def get_skill_endpoint(skill_id: str):
+    try:
+        scope, skill = skills_registry.get_skill(skill_id)
+        return dict(skill, scope=scope)
+    except skills_registry.SkillNotFound:
+        raise HTTPException(status_code=404, detail=f"No skill with id '{skill_id}'.")
+
+
+@app.put("/admin/skills/{skill_id}")
+@app.patch("/admin/skills/{skill_id}")
+def update_skill_endpoint(skill_id: str, req: SkillUpdate):
+    changes = req.model_dump(exclude_unset=True) if hasattr(req, "model_dump") else req.dict(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="No fields supplied to update.")
+    try:
+        return skills_registry.update_skill(skill_id, changes)
+    except skills_registry.SkillNotFound:
+        raise HTTPException(status_code=404, detail=f"No skill with id '{skill_id}'.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.delete("/admin/skills/{skill_id}")
+def delete_skill_endpoint(skill_id: str):
+    try:
+        removed = skills_registry.delete_skill(skill_id)
+        return {"status": "deleted", "skill": removed}
+    except skills_registry.SkillNotFound:
+        raise HTTPException(status_code=404, detail=f"No skill with id '{skill_id}'.")
+
+
+@app.get("/admin/preview-skills")
+def admin_preview_skills(question: str, database_identifier: str = "", schema_text: str = ""):
+    """
+    Which skills a question would activate, and why — so a wrong rule can be
+    found without reading the generated SQL and guessing.
+    """
+    return {
+        "question": question,
+        "database_identifier": database_identifier,
+        "scopes_applied": skills_registry.resolve_scopes(database_identifier),
+        "active_skills": skills_registry.describe_active_skills(
+            question,
+            schema_text=schema_text or None,
+            db_identifier=database_identifier,
+        ),
+    }
+
 @app.get("/admin/get-all-tables")
-def admin_get_all_tables():
+def admin_get_all_tables(environment: str = "default"):
     if not os.path.exists(ADMIN_CONFIG_FILE):
         raise HTTPException(status_code=400, detail="Database is not configured.")
         
     try:
         import json
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-            config = json.load(f)
+            config_data = json.load(f)
+            config = config_data.get(environment)
+            if not config:
+                raise HTTPException(status_code=400, detail=f"Environment '{environment}' not found.")
             
         cipher = get_cipher()
         try:

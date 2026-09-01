@@ -26,9 +26,10 @@ from mssql_schema_reader import (
 )
 from mssql_sql_generator import generate_tsql, generate_answer_summary, generate_rule_from_sql
 from mssql_executor import validate_tsql, execute_tsql
-from history_manager import init_db, save_chat, get_business_rules, save_business_rules, save_user_suggestion, get_user_suggestions, get_chat_history, clear_chat_history
-from file_reader import read_project
-from search_engine import search_files
+import uuid
+from history_manager import init_db, save_chat, save_user_suggestion, get_user_suggestions, get_chat_history, clear_chat_history
+# skills.json is the single source of business rules.
+import skills as skills_registry
 
 # Import unified adapters
 from db_adapters import (
@@ -525,23 +526,25 @@ st.markdown("""
 # Session state defaults
 # ─────────────────────────────────────────────
 for key, default in {
+    "mode": "Database AI Assistant",
     "db_type": "MS SQL",
     "mssql_conn": None,
     "all_tables": [],
     "selected_tables": [],
     "chat_history": [],
     "table_multiselect": [],
-    "project_files": [],
-    "project_path": "",
-    "project_answer": "",
     "suggested_questions": [],
     "last_schema_for_questions": "",
     "pending_question": None,
     "db_identifier": "",
-    "business_rules": "",
+    "skills_scope": "",
+    "project_files": [],
+    "project_answer": "",
+    "project_chunks": [],
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
+
 
 
 # ─────────────────────────────────────────────
@@ -551,16 +554,16 @@ with st.sidebar:
     # App wordmark
     st.markdown("""
     <div style="padding:0.25rem 0 1rem; border-bottom:1px solid var(--border); margin-bottom:0.75rem;">
-        <span style="font-size:1.05rem; font-weight:700; color:var(--text-1); letter-spacing:-0.01em;">⬡ DB&nbsp;<span style="color:var(--accent)">Assistant</span></span>
+        <span style="font-size:1.05rem; font-weight:700; color:var(--text-1); letter-spacing:-0.01em;">⬡ AI&nbsp;<span style="color:var(--accent)">Assistant</span></span>
     </div>
     """, unsafe_allow_html=True)
 
     # Mode Toggle
-    is_file_reader = st.toggle("📁 File Reader Mode", value=False)
-    mode = "File Reader AI Assistant" if is_file_reader else "Database AI Assistant"
+    mode = st.radio("Mode", ["Database AI Assistant", "File Reader AI Assistant"], key="mode", label_visibility="collapsed")
+    st.divider()
 
-    # Database selection
     if mode == "Database AI Assistant":
+        # Database selection
         st.markdown('<p class="sidebar-section-label">Database</p>', unsafe_allow_html=True)
         db_type = st.selectbox(
             "Database Type",
@@ -582,50 +585,21 @@ with st.sidebar:
             st.session_state["chat_history"] = []
             st.session_state["db_type"] = db_type
             st.rerun()
-    else:
-        db_type = st.session_state["db_type"]
 
-    # Model selection
-    st.markdown('<p class="sidebar-section-label">Model</p>', unsafe_allow_html=True)
-    available_models = list_ollama_models()
-    if available_models:
-        selected_model = st.selectbox("Model", options=available_models, label_visibility="collapsed")
-    else:
-        st.warning("No Ollama models found. Run `ollama pull <model>` first.")
-        selected_model = st.text_input("Model name", value="qwen2.5-coder:7b", label_visibility="collapsed")
-
-    # ── File Reader Mode ──
-    if mode == "File Reader AI Assistant":
-        st.markdown('<p class="sidebar-section-label">Upload Files</p>', unsafe_allow_html=True)
-        uploaded_files = st.file_uploader("Upload PDFs or Code", accept_multiple_files=True, label_visibility="collapsed")
+        # Environment selection
+        st.markdown('<p class="sidebar-section-label">Environment</p>', unsafe_allow_html=True)
+        env = st.selectbox("Environment", ["dev", "qa", "prod"], key="db_environment", label_visibility="collapsed")
         
-        if st.button("Process Files", use_container_width=True):
-            if not uploaded_files:
-                st.warning("Please upload at least one file.")
-            else:
-                try:
-                    import tempfile
-                    import os
-                    
-                    # Create a temporary directory on the server
-                    temp_dir = tempfile.mkdtemp()
-                    
-                    # Save all uploaded files to this temporary directory
-                    for uf in uploaded_files:
-                        with open(os.path.join(temp_dir, uf.name), "wb") as f:
-                            f.write(uf.getbuffer())
-                            
-                    # Use the existing read_project function on the temporary directory
-                    files = read_project(temp_dir)
-                    st.session_state["project_files"] = files
-                    st.session_state["project_path"] = "Uploaded Files"
-                    st.session_state["project_answer"] = ""
-                    st.success(f"{len(files)} files loaded")
-                except Exception as e:
-                    st.error(str(e))
+        # Model selection
+        st.markdown('<p class="sidebar-section-label">Model</p>', unsafe_allow_html=True)
+        available_models = list_ollama_models()
+        if available_models:
+            selected_model = st.selectbox("Model", options=available_models, key="db_model", label_visibility="collapsed")
+        else:
+            st.warning("No Ollama models found. Run `ollama pull <model>` first.")
+            selected_model = st.text_input("Model name", value="qwen2.5-coder:7b", label_visibility="collapsed")
 
-    # ── Database Mode connection form ──
-    if mode == "Database AI Assistant":
+        # ── Database Mode connection form ──
         st.markdown('<p class="sidebar-section-label">Connection</p>', unsafe_allow_html=True)
         conn_params = {}
         connect_disabled = False
@@ -640,15 +614,15 @@ with st.sidebar:
                 connect_disabled = True
 
             c1, c2 = st.columns(2)
-            server   = c1.text_input("Server",   placeholder="Host\\Instance", label_visibility="collapsed")
-            database = c2.text_input("Database", placeholder="Database",       label_visibility="collapsed")
+            server   = c1.text_input("Server",   placeholder="Host\\Instance", key="db_server", label_visibility="collapsed")
+            database = c2.text_input("Database", placeholder="Database",       key="db_database", label_visibility="collapsed")
 
-            auth_mode = st.selectbox("Auth", ["Windows Authentication", "SQL Server Authentication"], label_visibility="collapsed")
+            auth_mode = st.selectbox("Auth", ["Windows Authentication", "SQL Server Authentication"], key="db_auth_mode", label_visibility="collapsed")
             username = password = None
             if auth_mode == "SQL Server Authentication":
                 c3, c4 = st.columns(2)
-                username = c3.text_input("Username", placeholder="Username", label_visibility="collapsed")
-                password = c4.text_input("Password", type="password", placeholder="Password", label_visibility="collapsed")
+                username = c3.text_input("Username", placeholder="Username", key="db_username", label_visibility="collapsed")
+                password = c4.text_input("Password", type="password", placeholder="Password", key="db_password", label_visibility="collapsed")
 
             conn_params = {"server": server, "database": database, "auth_mode": auth_mode, "username": username, "password": password, "driver": driver}
 
@@ -720,11 +694,14 @@ with st.sidebar:
                         st.session_state["selected_tables"] = []
                         st.session_state.pop("table_multiselect", None)
                         st.session_state["chat_history"] = []
-                        db_ident = f"{db_type}_{conn_params.get('database') or conn_params.get('db_path') or conn_params.get('host') or 'default'}"
+                        env = st.session_state.get('db_environment', 'dev')
+                        db_ident = f"{env}_{db_type}_{conn_params.get('database') or conn_params.get('db_path') or conn_params.get('host') or 'default'}"
                         st.session_state["db_identifier"] = db_ident
-                        st.session_state["business_rules"] = get_business_rules(db_ident)
-                        if "business_rules_widget" in st.session_state:
-                            del st.session_state["business_rules_widget"]
+                        # Rules are scoped by database name, shared across environments.
+                        st.session_state["skills_scope"] = (
+                            conn_params.get('database') or conn_params.get('db_path')
+                            or conn_params.get('host') or skills_registry.GLOBAL_SCOPE
+                        )
                     except Exception as exc:
                         st.error(f"Connection failed: {exc}")
 
@@ -773,8 +750,46 @@ with st.sidebar:
                 st.session_state.pop("table_multiselect", None)
                 st.session_state["chat_history"] = []
                 st.session_state["db_identifier"] = ""
-                st.session_state["business_rules"] = ""
+                st.session_state["skills_scope"] = ""
                 st.rerun()
+
+    elif mode == "File Reader AI Assistant":
+        db_type = st.session_state["db_type"]
+        st.markdown('<p class="sidebar-section-label">Upload Document</p>', unsafe_allow_html=True)
+        uploaded_file = st.file_uploader("Upload document or spreadsheet", type=["docx", "txt", "pdf", "csv", "xlsx", "xls"], label_visibility="collapsed")
+        
+        # Model selection
+        st.markdown('<p class="sidebar-section-label">Model</p>', unsafe_allow_html=True)
+        available_models = list_ollama_models()
+        if available_models:
+            selected_model = st.selectbox("Model", options=available_models, key="file_model", label_visibility="collapsed")
+        else:
+            st.warning("No Ollama models found.")
+            selected_model = st.text_input("Model name", value="llama3:latest", label_visibility="collapsed")
+
+        if st.button("Process File", use_container_width=True):
+            if not uploaded_file:
+                st.warning("Please upload a file first.")
+            else:
+                with st.spinner("Processing document..."):
+                    import os
+                    import v2_rag_engine
+                    
+                    os.makedirs(v2_rag_engine.V2_UPLOAD_DIR, exist_ok=True)
+                    dest_path = os.path.join(v2_rag_engine.V2_UPLOAD_DIR, uploaded_file.name)
+                    
+                    # save file
+                    with open(dest_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                        
+                    try:
+                        res = v2_rag_engine.ingest_file_v2(dest_path, uploaded_file.name)
+                        st.session_state["project_files"] = [uploaded_file.name]
+                        st.session_state["project_answer"] = ""
+                        st.session_state["project_chunks"] = []
+                        st.success(f"File processed successfully! ({res.get('chunks_added', 0)} chunks loaded)")
+                    except Exception as e:
+                        st.error(f"Error processing file: {e}")
 
     st.divider()
     if st.button("↺  Reset App", use_container_width=True, help="Reset all inputs and settings"):
@@ -786,59 +801,68 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-
 # ─────────────────────────────────────────────
 # Main — File Reader Mode
 # ─────────────────────────────────────────────
 if mode == "File Reader AI Assistant":
-    st.markdown("## 📁 File Reader")
-    st.caption("Ask questions about your codebase or project files")
+    st.markdown("## 📄 Document AI Assistant")
+    st.caption("Ask questions about your uploaded document")
 
-    if not st.session_state["project_files"]:
+    if not st.session_state.get("project_files"):
         st.markdown("""
         <div class="welcome-card">
             <h3>Getting started</h3>
-            <div class="step-row"><div class="step-num">1</div><div class="step-text">Enter your project folder path in the sidebar</div></div>
-            <div class="step-row"><div class="step-num">2</div><div class="step-text">Click <strong>Load Project</strong> to index your files</div></div>
-            <div class="step-row"><div class="step-num">3</div><div class="step-text">Ask questions about your code in plain English</div></div>
+            <div class="step-row"><div class="step-num">1</div><div class="step-text">Upload a document, PDF, or spreadsheet in the sidebar</div></div>
+            <div class="step-row"><div class="step-num">2</div><div class="step-text">Click <strong>Process File</strong> to analyze it</div></div>
+            <div class="step-row"><div class="step-num">3</div><div class="step-text">Ask questions about your document in plain English</div></div>
         </div>
         """, unsafe_allow_html=True)
         st.stop()
 
-    project_question = st.chat_input("Ask about the project…")
+    project_question = st.chat_input("Ask about the document...")
 
     if project_question:
         if not project_question.strip():
             st.warning("Please enter a question.")
             st.stop()
 
-        matched_files = search_files(project_question, st.session_state["project_files"])
-        prompt = ""
-        for file in matched_files:
-            prompt += f"\n\nFILE: {file['filename']}\n"
-            prompt += file["content"][:80000]
-        prompt += f"\n\nQuestion:\n{project_question}"
+        import v2_rag_engine
+        from ollama_client import ask_ollama
 
-        with st.spinner("Analysing project…"):
-            answer = ask_ollama(prompt, model=selected_model)
+        with st.spinner("Analyzing document..."):
+            # Retrieve relevant chunks
+            chunks = v2_rag_engine.retrieve_and_rerank(project_question)
+            
+            if not chunks:
+                answer = "This detail is currently not available in the uploaded document."
+            else:
+                # Build prompt
+                prompt = "You must answer the user's question using ONLY the provided document context.\n\n"
+                prompt += "DOCUMENT CONTEXT:\n" + "\n\n---\n\n".join(chunks) + "\n\n"
+                prompt += f"USER QUESTION: {project_question}\n\n"
+                prompt += "Answer directly without 'According to the document'. If the answer is not in the context, say 'This detail is currently not available.'"
+
+                answer = ask_ollama(prompt, model=st.session_state.get("file_model", "llama3:latest"))
 
         st.session_state["project_answer"] = answer
+        st.session_state["project_chunks"] = chunks
 
-        with st.expander(f"📎 {len(matched_files)} matched files", expanded=False):
-            for file in matched_files:
-                st.code(file["path"], language="")
-
-    if st.session_state["project_answer"]:
+    if st.session_state.get("project_answer"):
         st.markdown("**Answer**")
         st.info(st.session_state["project_answer"])
 
-    st.stop()
+        if st.session_state.get("project_chunks"):
+            with st.expander("📎 View Reference Context"):
+                for i, chunk in enumerate(st.session_state["project_chunks"]):
+                    st.markdown(f"**Chunk {i+1}**\n{chunk}")
+                    st.divider()
 
+    st.stop()
 
 # ─────────────────────────────────────────────
 # Main — Database Mode landing
 # ─────────────────────────────────────────────
-if mode == "Database AI Assistant" and st.session_state["mssql_conn"] is None:
+if st.session_state["mssql_conn"] is None:
     desc_query_lang = "T-SQL" if db_type == "MS SQL" else ("NoSQL queries" if db_type in ["MongoDB", "Redis"] else "SQL")
 
     st.markdown(f"## 🗄️ {db_type} Assistant")
@@ -931,50 +955,61 @@ with tab_query:
         st.stop()
 
     # Collapsible context panels
-    with st.expander("📋 Active schema", expanded=False):
-        with st.container(height=350):
-            try:
-                schema_text = get_db_schema_text(conn, db_type, selected_tables)
-                st.code(schema_text, language="json" if db_type in ["MongoDB", "Redis"] else "sql")
-            except Exception as exc:
-                st.error(f"Could not load schema: {exc}")
-                st.stop()
-
-    with st.expander("🧠 Business rules", expanded=False):
-        def on_rules_change():
-            st.session_state["business_rules"] = st.session_state["business_rules_widget"]
-            save_business_rules(st.session_state.get("db_identifier", ""), st.session_state["business_rules"])
-
-        def on_save_next():
-            import re
-            raw_text = st.session_state.get("business_rules_widget", "")
-            lines = raw_text.strip().split('\n') if raw_text.strip() else []
-            cleaned_lines = []
-            for line in lines:
-                cleaned_line = re.sub(r'^\d+\.\s*', '', line.strip())
-                if cleaned_line:
-                    cleaned_lines.append(cleaned_line)
-            numbered_text = ""
-            for i, c_line in enumerate(cleaned_lines):
-                numbered_text += f"{i+1}. {c_line}\n"
-            next_num = len(cleaned_lines) + 1
-            numbered_text += f"{next_num}. "
-            st.session_state["business_rules"] = numbered_text
-            st.session_state["business_rules_widget"] = numbered_text
-            save_business_rules(st.session_state.get("db_identifier", ""), numbered_text)
-
-        if "business_rules_widget" not in st.session_state:
-            st.session_state["business_rules_widget"] = st.session_state.get("business_rules", "")
-
-        st.text_area(
-            "Rules for the AI (e.g. 'Total length means EndCh - StartCh')",
-            height=350,
-            key="business_rules_widget",
-            on_change=on_rules_change,
-            label_visibility="collapsed",
-            placeholder="Add specific rules or formulas…",
+    with st.expander("AI Skills (Dynamic Business Rules)", expanded=False):
+        skills_scope = st.session_state.get("skills_scope") or skills_registry.GLOBAL_SCOPE
+        st.caption(
+            f"Editing scope **{skills_scope}** — these rules apply to every environment "
+            "pointing at this database. Separate keywords with commas; leave keywords "
+            "empty to always apply. 'Requires tables' keeps a rule dormant unless those "
+            "tables are selected."
         )
-        st.button("💾 Save & Next", help="Save and number the next rule", on_click=on_save_next)
+
+        stored = skills_registry.list_skills(skills_scope)
+
+        df_data = [
+            {
+                "name": s.get("name", s.get("id", "")),
+                "keywords": ", ".join(s.get("keywords", []) or []),
+                "requires_tables": ", ".join(s.get("requires_tables", []) or []),
+                "priority": s.get("priority", 200),
+                "enabled": s.get("enabled", True),
+                "instruction": s.get("instruction", s.get("rule_text", "")),
+            }
+            for s in stored
+        ]
+        if not df_data:
+            df_data.append({"name": "", "keywords": "", "requires_tables": "",
+                            "priority": 200, "enabled": True, "instruction": ""})
+
+        import pandas as pd
+        edited_df = st.data_editor(
+            pd.DataFrame(df_data), num_rows="dynamic",
+            use_container_width=True, key="skills_editor", hide_index=True,
+        )
+
+        if st.button("💾 Save Skills"):
+            # Keep each row's existing id so edits update rather than duplicate.
+            ids_by_name = {s.get("name"): s.get("id") for s in stored}
+            new_skills = []
+            for _, row in edited_df.iterrows():
+                instruction = str(row.get("instruction", "")).strip()
+                if not instruction:
+                    continue
+                name = str(row.get("name", "")).strip() or "Custom Rule"
+                keywords = [k.strip() for k in str(row.get("keywords", "")).split(",") if k.strip()]
+                tables = [t.strip() for t in str(row.get("requires_tables", "")).split(",") if t.strip()]
+                new_skills.append({
+                    "id": ids_by_name.get(name) or uuid.uuid4().hex[:8],
+                    "name": name,
+                    "enabled": bool(row.get("enabled", True)),
+                    "priority": int(row.get("priority") or 200),
+                    "match": "any" if keywords else "always",
+                    "keywords": keywords,
+                    "requires_tables": tables,
+                    "instruction": instruction,
+                })
+            skills_registry.save_scope_skills(skills_scope, new_skills)
+            st.success(f"Saved {len(new_skills)} skill(s) to scope '{skills_scope}' in skills.json")
 
     with st.expander("💡 Suggested questions", expanded=False):
         try:
@@ -1094,9 +1129,14 @@ with tab_query:
                 with st.spinner(f"Generating {query_lang_name}…"):
                     try:
                         schema_text = get_db_schema_text(conn, db_type, selected_tables)
+                        active_rules = skills_registry.load_skills(
+                            question,
+                            schema_text=schema_text,
+                            db_identifier=st.session_state.get("db_identifier", ""),
+                        )
                         sql = generate_db_query(
                             db_type, question, schema_text,
-                            business_rules=st.session_state.get("business_rules", ""),
+                            business_rules=active_rules,
                             model=selected_model
                         )
                     except Exception as exc:

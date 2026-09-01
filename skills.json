@@ -1,0 +1,281 @@
+{
+    "version": 2,
+    "scopes": {
+        "*": [
+            {
+                "id": "sql_query_discipline",
+                "name": "SQL Query Discipline",
+                "enabled": true,
+                "priority": 10,
+                "match": "always",
+                "keywords": [],
+                "requires_tables": [],
+                "instruction": "- READ-ONLY: Generate SELECT statements only. Never INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, EXEC or EXECUTE.\n- SINGLE FROM CLAUSE: Never use more than one FROM clause. Connect every additional table with INNER JOIN or LEFT JOIN placed after the first FROM and before the WHERE.\n- LOGICAL GROUPING: Whenever a WHERE clause contains OR, wrap the OR conditions in parentheses.\n- ALIAS DISCIPLINE: Use the exact alias defined in the FROM or JOIN clause. Never reference an alias you did not define. Prefer short descriptive aliases.\n- EXPLICIT COLUMNS: Return only the columns the question asks for. Never use SELECT *.\n- LITERAL VALUES: Always inline literal values. Never emit SQL parameters or placeholders such as @District or ?."
+            },
+            {
+                "id": "schema_grounding",
+                "name": "Schema Grounding",
+                "enabled": true,
+                "priority": 20,
+                "match": "always",
+                "keywords": [],
+                "requires_tables": [],
+                "instruction": "- USE ONLY THE PROVIDED SCHEMA: Every table and column you reference MUST appear verbatim in the Database Schema section above. Never invent, guess, or pluralise a name.\n- NO SILENT SUBSTITUTION: If the table or column the question names is not in the schema, do NOT answer using a similarly named one. A question about a table that is absent from the schema is unanswerable.\n- UNANSWERABLE QUESTIONS: When the schema cannot answer the question, return exactly: SELECT 'SCHEMA_INSUFFICIENT' AS Error"
+            },
+            {
+                "id": "tsql_dialect",
+                "name": "T-SQL Dialect",
+                "enabled": true,
+                "priority": 30,
+                "match": "always",
+                "keywords": [],
+                "requires_tables": [],
+                "instruction": "- Target Microsoft SQL Server (T-SQL).\n- Quote identifiers with square brackets: [SchemaName].[TableName].\n- Use TOP for row limiting, never LIMIT.\n- Use LIKE with % wildcards for string patterns.\n- Use T-SQL date functions: GETDATE(), DATEADD(), DATEDIFF(), FORMAT(). Never use MySQL or PostgreSQL date syntax.\n- Cast averages explicitly, e.g. CAST(AVG(metric) AS DECIMAL(10,2))."
+            }
+        ],
+        "Hims_Zrams": [
+            {
+                "id": "pwd_primary_data_source",
+                "name": "Primary Data Source (RoadDetails_Vani)",
+                "enabled": true,
+                "priority": 90,
+                "match": "always",
+                "keywords": [],
+                "requires_tables": [
+                    "RoadDetails_Vani"
+                ],
+                "instruction": "- PREFERRED SOURCE: Retrieve road data from [RoadDetails_Vani] when it is available.\n- ROAD LENGTH: A specific road's length is the Length column of RoadDetails_Vani for that RoadCode.\n- SPECIFIC ROAD: When the question names a particular road, filter with RoadCode = '<code>'.\n- NOT ROAD-SPECIFIC: When the question is not about one particular road, do NOT put RoadCode in the WHERE clause.\n- LINKS: Include linkcode in the WHERE clause only when the question is about a link."
+            },
+            {
+                "id": "pwd_deduplication",
+                "name": "Duplicate Handling",
+                "enabled": true,
+                "priority": 92,
+                "match": "always",
+                "keywords": [],
+                "requires_tables": [],
+                "instruction": "- Rows carrying identical data for the requested information are duplicates; return only one.\n- Use DISTINCT whenever duplicate rows are possible.\n- If duplicates persist because of extra columns, return the first record only, using ROW_NUMBER() or TOP (1) with an explicit ORDER BY."
+            },
+            {
+                "id": "pwd_length_columns",
+                "name": "Length Column Selection",
+                "enabled": true,
+                "priority": 94,
+                "match": "any",
+                "keywords": [
+                    "length",
+                    "long",
+                    "longest",
+                    "km",
+                    "kilometre",
+                    "kilometer",
+                    "link"
+                ],
+                "requires_tables": [],
+                "instruction": "- LINK length: use the [llength] column.\n- ROAD length: use the [Length] column.\n- Do not substitute one for the other."
+            },
+            {
+                "id": "pwd_road_classification",
+                "name": "Road Classification Terminology",
+                "enabled": true,
+                "priority": 96,
+                "match": "any",
+                "keywords": [
+                    "category",
+                    "categories",
+                    "class",
+                    "classification",
+                    "major road",
+                    "district road",
+                    "sh",
+                    "nh",
+                    "mdr",
+                    "odr",
+                    "vr",
+                    "type",
+                    "types"
+                ],
+                "requires_tables": [],
+                "instruction": "- SYNONYMS: 'Class' and 'Category' both mean Road Category.\n- Use the [category] column to classify roads as SH Roads, MDR Roads and so on.\n- 'How many types of road categories' = COUNT(DISTINCT RoadClass).\n- 'Major Roads' means Category = 'SH'.\n- 'District Roads' means Category = 'MDR'.\n- FULL NAMES: State Highway = SH, National Highway = NH, Major District Road = MDR, Other District Road = ODR, Village Road = VR. Always filter on the abbreviation."
+            },
+            {
+                "id": "national_highway_value_variants",
+                "name": "National Highway Value Variants",
+                "enabled": true,
+                "priority": 97,
+                "match": "any",
+                "keywords": [
+                    "national highway",
+                    "nh"
+                ],
+                "requires_tables": [
+                    "RoadMaster"
+                ],
+                "instruction": "- RoadClass stores National Highways under TWO values: 'NH' and 'NH National Highway'. When filtering or counting National Highways you MUST match both, e.g. WHERE RoadClass IN ('NH', 'NH National Highway').\n- Do not use LIKE 'NH%' for this: it would also match nothing else today, but the two exact values are the reliable filter."
+            },
+            {
+                "id": "pwd_key_columns",
+                "name": "Key Column Differences",
+                "enabled": true,
+                "priority": 98,
+                "match": "always",
+                "keywords": [],
+                "requires_tables": [],
+                "instruction": "- The [Roads] table keys on [Road_id].\n- The [RoadMaster] and [LinkMaster] tables key on [RoadCode].\n- Never use RoadCode against the Roads table, or Road_id against RoadMaster/LinkMaster."
+            },
+            {
+                "id": "pwd_filter_literals",
+                "name": "PWD Filter Literals",
+                "enabled": true,
+                "priority": 100,
+                "match": "any",
+                "keywords": [
+                    "district",
+                    "road",
+                    "section"
+                ],
+                "requires_tables": [],
+                "instruction": "- Filter District, Road and Section on exact values, e.g. WHERE r.District = 'Jhalawar'."
+            },
+            {
+                "id": "511a1a4a",
+                "name": "Road Length Units",
+                "enabled": true,
+                "priority": 105,
+                "match": "any",
+                "keywords": [
+                    "length",
+                    "km",
+                    "kilometre",
+                    "kilometer",
+                    "longest",
+                    "total length"
+                ],
+                "requires_tables": [
+                    "RoadMaster"
+                ],
+                "instruction": "- LENGTH UNITS: [dbo].[RoadMaster].[Length] is stored in METRES. Whenever the question asks for length in kilometres, divide by 1000.0 and CAST the result AS DECIMAL(10,2).\n- TEST DATA: Rows where RoadCode LIKE 'N%' are seed records and must be excluded from totals and rankings."
+            },
+            {
+                "id": "pwd_network_dashboard",
+                "name": "Network Dashboard & Aggregate Metrics",
+                "enabled": true,
+                "priority": 110,
+                "match": "any",
+                "keywords": [
+                    "total network",
+                    "dashboard",
+                    "black spot",
+                    "accident",
+                    "total link",
+                    "total length"
+                ],
+                "requires_tables": [
+                    "LinkMaster"
+                ],
+                "instruction": "- DASHBOARD VS INVENTORY: For aggregate network metrics (Total Network Length, Total Bridges, Total SH roads, Total Traffic Stations) use LinkMaster and the rules below. For detailed inventory or condition questions about a specific road or district, use Roads, Road_Sections and Pavement_Condition instead.\n- ROAD COUNTS: Count SH, MDR, ODR or VR roads as COUNT(DISTINCT RoadCode) FROM LinkMaster lm WHERE RoadCode LIKE 'SH%' (or 'MDR%', 'ODR%', 'VR%').\n- LINK COUNT: Total links = COUNT(DISTINCT linkcode) FROM LinkMaster lm INNER JOIN SysAllLocs ON SysAllLocs.Level5Code = LinkMaster.GeoID.\n- ROAD LENGTH: Length of SH/MDR/ODR/VR roads in km = SUM((lm.EndChainage - lm.StartChainage) / 1000.0) FROM LinkMaster lm INNER JOIN RoadMaster rm ON lm.RoadCode = rm.RoadCode WHERE rm.RoadClass = 'SH' AND lm.Direction = 'I'.\n- TOTAL NETWORK LENGTH: SUM((lm.EndChainage - lm.StartChainage) / 1000.0) FROM LinkMaster lm.\n- BLACK SPOTS: COUNT records FROM BlackSpots al INNER JOIN LinkMaster lm ON al.RoadCode = lm.RoadCode AND al.StartCh >= lm.StartChainage AND al.StartCh < lm.EndChainage."
+            },
+            {
+                "id": "pwd_road_inventory",
+                "name": "Road Inventory Details",
+                "enabled": true,
+                "priority": 120,
+                "match": "any",
+                "keywords": [
+                    "road",
+                    "length",
+                    "district",
+                    "section",
+                    "sh",
+                    "nh",
+                    "mdr",
+                    "odr",
+                    "vr"
+                ],
+                "requires_tables": [
+                    "Roads",
+                    "Road_Sections"
+                ],
+                "instruction": "- MANDATORY JOIN: When querying Road_Sections, always INNER JOIN Roads ON Road_Sections.Road_id = Roads.Road_id.\n- TERMINOLOGY: State Highway = SH, National Highway = NH, Major District Road = MDR, Other District Road = ODR, Village Road = VR. Filter on the abbreviation, not the full name.\n- ROAD CLASS: 'State Highway' = Road_Class = 'SH'; 'National Highway' = Road_Class = 'NH'; 'MDR' = Road_Class = 'MDR'.\n- PAVEMENT TYPES: Match with LIKE '%flexible pavement%' or LIKE '%Rigid pavement%'."
+            },
+            {
+                "id": "pwd_pavement_condition",
+                "name": "Pavement & IRI Condition",
+                "enabled": true,
+                "priority": 130,
+                "match": "any",
+                "keywords": [
+                    "iri",
+                    "condition",
+                    "pci",
+                    "rutting",
+                    "cracking",
+                    "pothole",
+                    "edgebreak",
+                    "poor",
+                    "fair",
+                    "good",
+                    "roughness"
+                ],
+                "requires_tables": [
+                    "Pavement_Condition"
+                ],
+                "instruction": "- IRI COLUMNS: For IRI thresholds query all three IRI columns with OR, e.g. WHERE (LWPIRI < 4 OR RWPIRI < 4 OR LaneIRI < 4). Do not use IRIGrade for thresholds.\n- MANDATORY JOINS: When querying Pavement_Condition, always INNER JOIN Road_Sections ON Pavement_Condition.Section_id = Road_Sections.Section_id and INNER JOIN Roads ON Pavement_Condition.Road_id = Roads.Road_id.\n- PCI CLASSIFICATION (CASE): <=1 'Very Poor'; >1 and <=2 'Poor'; >2 and <=3 'Fair'; >3 and <=4 'Good'; >4 'Very Good'.\n- CRACKING / POTHOLE / EDGEBREAK CLASSIFICATION (CASE): <=0 'Very Good'; >0.1 and <=10 'Good'; >10.1 and <=30 'Fair'; >30.1 and <=60 'Poor'; >60.1 and <=90 'Very Poor'.\n- LOOKUP TABLES: IRI condition = LEFT JOIN LKPTRISRgh ON IRI >= MinIRI AND IRI <= MaxIRI, returning Catg; 'high roughness' means Grade = 4. Rutting = LEFT JOIN LKPTRISRutSev ON Rutting_mm >= Min AND Rutting_mm < Max, returning Name.\n- VERY POOR STRETCHES: Length = SUM((r.EndCh - r.StartCh) / 1000.00) FROM RISRghSumm r WHERE IRIGrade = 'Poor'."
+            },
+            {
+                "id": "pwd_traffic_volume",
+                "name": "Traffic Volume Analysis",
+                "enabled": true,
+                "priority": 140,
+                "match": "any",
+                "keywords": [
+                    "traffic",
+                    "busiest",
+                    "heavy",
+                    "moderate",
+                    "aadt",
+                    "trucks",
+                    "growth"
+                ],
+                "requires_tables": [
+                    "Traffic_Data"
+                ],
+                "instruction": "- MANDATORY JOINS: When querying Traffic_Data, always INNER JOIN Road_Sections ON Traffic_Data.section_id = Road_Sections.Section_id and INNER JOIN Roads ON Road_Sections.Road_id = Roads.Road_id.\n- TRAFFIC BANDS: 'Busiest' or 'heavy' traffic means AADT > 10000 or TrfCatg = 6. 'Moderate' traffic means TrfCatg = 3.\n- TOTAL TRUCKS = TwoAxle + ThrAxle + MultiAxle.\n- TRAFFIC GROWTH %: (SUM(AADT) - LAG(SUM(AADT)) OVER (PARTITION BY Road_id ORDER BY survey_year)) * 100.0 / NULLIF(LAG(SUM(AADT)) OVER (PARTITION BY Road_id ORDER BY survey_year), 0)."
+            },
+            {
+                "id": "pwd_traffic_stations",
+                "name": "Traffic Survey Stations",
+                "enabled": true,
+                "priority": 150,
+                "match": "any",
+                "keywords": [
+                    "station",
+                    "stations",
+                    "tvc"
+                ],
+                "requires_tables": [
+                    "TISTrfMaster"
+                ],
+                "instruction": "- STATION COUNT: Total traffic stations = SELECT COUNT(*) FROM TISTrfMaster. Do not filter on CountType.\n- TVC COUNT: Use exactly SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm ON tc.StnCode = tm.StnCode."
+            },
+            {
+                "id": "pwd_bridges_structures",
+                "name": "Bridges & Structures",
+                "enabled": true,
+                "priority": 160,
+                "match": "any",
+                "keywords": [
+                    "bridge",
+                    "bridges",
+                    "culvert",
+                    "bci",
+                    "bcirtng"
+                ],
+                "requires_tables": [
+                    "BISBrdgLst"
+                ],
+                "instruction": "- BRIDGE TYPE CODES: Filter minor and major bridges on the codes 'MIN' and 'MAJ', e.g. WHERE BridgeType = 'MIN', not 'Minor'.\n- TOTAL BRIDGES: COUNT(BridgeCode) FROM BISBrdgLst.\n- VERY POOR BRIDGES: COUNT(DISTINCT bl.BridgeCode) FROM BISBrdgLst bl INNER JOIN oBISBCI bc ON bc.BridgeCode = bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'."
+            }
+        ]
+    }
+}
