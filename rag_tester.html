@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced RAG API Tester</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background-color: #f9f9f9; color: #333; }
+        .section { background: white; margin-bottom: 25px; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #2c3e50; }
+        h3 { margin-top: 0; color: #34495e; }
+        input[type="file"], input[type="text"] { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        button { background-color: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; transition: background 0.3s; }
+        button:hover { background-color: #2980b9; }
+        .voice-btn { background-color: #e74c3c; width: 45px; height: 45px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; padding: 0; margin-left: 10px; flex-shrink: 0; }
+        .voice-btn:hover { background-color: #c0392b; }
+        .voice-btn.recording { animation: pulse 1.5s infinite; background-color: #2ecc71; }
+        #responseArea { white-space: pre-wrap; background: #2c3e50; color: #ecf0f1; padding: 20px; min-height: 150px; border-radius: 8px; font-family: monospace; line-height: 1.5; overflow-y: auto; }
+        .flex-row { display: flex; align-items: center; width: 100%; }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7); }
+            70% { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(46, 204, 113, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+        }
+    </style>
+</head>
+<body>
+    <h2>Advanced RAG API Tester</h2>
+
+    <!-- Upload Section -->
+    <div class="section">
+        <h3>1. Upload Document</h3>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.csv,.xlsx,.xls">
+        <button onclick="uploadFile()">Upload to RAG Engine</button>
+        <p id="uploadStatus" style="font-weight: bold; color: #27ae60;"></p>
+    </div>
+
+    <!-- Question Section -->
+    <div class="section">
+        <h3>2. Ask a Question</h3>
+        <div class="flex-row">
+            <input type="text" id="questionInput" placeholder="Type your question here or use voice..." onkeypress="if(event.key === 'Enter') askQuery()">
+            <button onclick="document.getElementById('questionInput').value=''" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #7f8c8d; padding: 0 10px;" title="Clear">✖</button>
+            <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()" title="Click to speak">🎤</button>
+        </div>
+        <div style="margin-top: 15px; display: flex; gap: 10px;">
+            
+            <button onclick="askQuery()" style="background-color: #f39c12;">Ask</button>
+        </div>
+    </div>
+
+    <!-- Response Section -->
+    <div class="section">
+        <h3>AI Response:</h3>
+        <div id="responseArea">Awaiting your question...</div>
+    </div>
+
+    <script>
+        // Set this to your running backend address (e.g. http://localhost:8000)
+        // If serving this HTML file directly from the fastapi app, use empty string ""
+        const API_BASE_URL = ""; 
+
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const status = document.getElementById('uploadStatus');
+            
+            if (!fileInput.files[0]) {
+                status.innerText = "❌ Please select a file first.";
+                status.style.color = "#e74c3c";
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            status.innerText = "⏳ Uploading and processing (this might take a moment)...";
+            status.style.color = "#f39c12";
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/upload-file`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    status.innerText = "✅ Success: " + result.filename + " is ready for querying!";
+                    status.style.color = "#27ae60";
+                } else {
+                    status.innerText = "❌ Error: " + (result.detail || JSON.stringify(result));
+                    status.style.color = "#e74c3c";
+                }
+            } catch (error) {
+                status.innerText = "❌ Connection Error: " + error.message;
+                status.style.color = "#e74c3c";
+            }
+        }
+
+        // Voice Recognition Setup
+        let recognition;
+        let isRecording = false;
+        
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRec();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            // Feel free to change lang to 'te-IN' or 'hi-IN' if you want to test multilingual!
+            recognition.lang = 'en-US'; 
+
+            recognition.onresult = function(event) {
+                let finalTranscript = '';
+                let interimTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+                document.getElementById('questionInput').value = finalTranscript || interimTranscript;
+                if (finalTranscript) {
+                    toggleVoice(); // Auto-stop when final result is reached
+                }
+            };
+            
+            recognition.onerror = function(event) {
+                console.error("Speech error", event.error);
+                toggleVoice();
+            };
+            
+            recognition.onend = function() {
+                if (isRecording) toggleVoice();
+            };
+        }
+
+        function toggleVoice() {
+            const btn = document.getElementById('voiceBtn');
+            const input = document.getElementById('questionInput');
+            
+            if (!recognition) {
+                alert("Speech recognition is not supported in this browser. Please use Chrome or Edge.");
+                return;
+            }
+            if (isRecording) {
+                recognition.stop();
+                btn.classList.remove('recording');
+                isRecording = false;
+            } else {
+                input.value = "";
+                input.placeholder = "Listening carefully...";
+                recognition.start();
+                btn.classList.add('recording');
+                isRecording = true;
+            }
+        }
+
+        async function askQuery() {
+            const question = document.getElementById('questionInput').value;
+            const responseArea = document.getElementById('responseArea');
+            
+            if (!question) { alert("Please type or speak a question!"); return; }
+            
+            responseArea.innerText = "🧠 Analyzing document and generating answer...";
+
+            const formData = new FormData();
+            formData.append("question", question);
+            formData.append("model", "llama3:latest"); 
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/ask-your-query`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    responseArea.innerText = result.answer || JSON.stringify(result, null, 2);
+                } else {
+                    responseArea.innerText = "❌ Error: " + (result.detail || JSON.stringify(result));
+                }
+            } catch (error) {
+                responseArea.innerText = "❌ Connection Error: " + error.message;
+            }
+        }
+
+        async function askQueryStream() {
+            const question = document.getElementById('questionInput').value;
+            const responseArea = document.getElementById('responseArea');
+            
+            if (!question) { alert("Please type or speak a question!"); return; }
+            
+            responseArea.innerText = "🧠 Connecting to AI Stream...\n\n";
+
+            const formData = new FormData();
+            formData.append("question", question);
+            formData.append("model", "llama3:latest"); 
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/ask-your-query-stream`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                responseArea.innerText = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.substring(6));
+                                if (data.text) {
+                                    // In V2 RAG, the stream buffer accumulates, so we replace text
+                                    responseArea.innerText = data.text; 
+                                }
+                            } catch (e) {
+                                // Ignore parse errors for incomplete chunks
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                responseArea.innerText = "❌ Connection Error: " + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

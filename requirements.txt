@@ -10,3 +10,12 @@ psycopg2-binary
 oracledb
 pymongo
 redis
+python-docx
+PyPDF2
+pypdf
+chromadb
+sentence-transformers
+pandas
+httpx
+python-multipart
+openpyxl

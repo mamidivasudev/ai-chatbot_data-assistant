@@ -31,8 +31,7 @@ os.environ["NO_PROXY"] = "127.0.0.1,localhost"
 # ---------------------------------
 
 
-from file_reader import read_project
-from search_engine import search_files
+import v2_rag_engine
 from fastapi import Depends, FastAPI, HTTPException, status, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -320,8 +319,16 @@ def connect(req: ConnectRequest, payload: dict = Depends(verify_token)):
         
         try:
             import json
+            existing_config = {}
+            if os.path.exists(ADMIN_CONFIG_FILE):
+                try:
+                    with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as _f:
+                        existing_config = json.load(_f)
+                except Exception:
+                    pass
+            existing_config[req.environment] = initial_config
             with open(ADMIN_CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(initial_config, f, indent=4)
+                json.dump(existing_config, f, indent=4)
         except Exception as e:
             logger.error(f"Failed to save initial admin config: {e}")
 
@@ -520,371 +527,24 @@ def disconnect(
     }
 
 @app.post("/ask-query", response_model=AskFilesResponse)
-def ask_files(req: AskFilesRequest, payload: dict = Depends(verify_token)):
-
-    if not req.question.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Question cannot be empty."
-        )
-
-    try:
-        # 1. Read files from the static directory
-        static_dir = r"\\SAT-HYD-W0007\Vasu\New folder\Database_reader_ai\files"
-        files_data = read_project(static_dir)
-        
-        if not files_data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No files found in {static_dir}"
-            )
-            
-        if req.filename:
-            files_data = [f for f in files_data if req.filename.lower() in f["filename"].lower()]
-            if not files_data:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"File matching '{req.filename}' not found."
-                )
-            
-        # 2. Search files
-        matched_files = search_files(req.question, files_data)
-        
-        # Fallback: If a specific filename was requested, use it even if keyword search matched 0 words (e.g. Hindi/Gujarati/Hinglish questions)
-        if not matched_files:
-            if req.filename and files_data:
-                matched_files = files_data
-            else:
-                return AskFilesResponse(
-                    question=req.question,
-                    answer="No relevant information found in the documents."
-                )
-            
-        # 3. Build prompt
-        prompt = (
-            "You are an AI assistant.\n"
-            "INSTRUCTION: Answer the user's question accurately. You may use the provided data to answer, and you may also use your general knowledge to answer questions.\n"
-            "IMPORTANT: Respond in the same language as the user's Question (e.g., if asked in Hindi, respond in Hindi).\n"
-            "DO NOT announce or write the name of the language in your response.\n"
-            "CRITICAL RULE: NEVER mention that you are reading a document, file, or context. Do not use words like 'document', 'PDF', 'provided text', 'this context', or 'information provided'. Answer directly as if you inherently know all the information.\n\n"
-        )
-        for file in matched_files:
-            prompt += f"FILE: {file['filename']}\n"
-            prompt += file["content"][:80000] + "\n\n"
-        prompt += f"Question:\n{req.question}"
-        
-        # 4. Ask Ollama
-        if req.model:
-            answer = ask_ollama(prompt, model=req.model)
-        else:
-            answer = ask_ollama(prompt)
-        
-        return AskFilesResponse(
-            question=req.question,
-            answer=answer
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Error processing ask-files request: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-@app.post("/upload-file-ask-query", response_model=AskFilesResponse)
-async def upload_ask_query(
-    question: str = Form(...),
-    model: Optional[str] = Form(None),
-    file: UploadFile = File(...),
-    payload: dict = Depends(verify_token)
-):
-    if not question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty.")
-        
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_file_path = os.path.join(temp_dir, file.filename)
-            with open(temp_file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-                
-            files_data = read_project(temp_dir)
-            
-            if not files_data:
-                raise HTTPException(status_code=400, detail="Could not read the uploaded file.")
-                
-            matched_files = search_files(question, files_data)
-            
-            if not matched_files:
-                matched_files = files_data
-                
-            prompt = MULTILINGUAL_PROMPT_TEMPLATE
-            for f in matched_files:
-                prompt += f"FACTS:\n"
-                prompt += f["content"][:80000] + "\n\n"
-            prompt += f"Question:\n{question}"
-            
-            if model:
-                answer = ask_ollama(prompt, model=model)
-            else:
-                answer = ask_ollama(prompt)
-                
-            return AskFilesResponse(
-                question=question,
-                answer=answer
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Error processing upload_ask_query request: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-@app.get("/v2/is-file-present")
-async def is_file_present():
-    upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_file")
-    if not os.path.exists(upload_dir):
-        return {"status": False, "file name": None}
-    files = [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]
-    if len(files) > 0:
-        return {"status": True, "file name": files[0]}
-    return {"status": False, "file name": None}
-
-@app.post("/v2/upload-file")
-async def upload_file_endpoint(file: UploadFile = File(...)):
-    upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_file")
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    for f in os.listdir(upload_dir):
-        file_path = os.path.join(upload_dir, f)
-        if os.path.isfile(file_path):
-            os.remove(file_path)
-            
-    dest_path = os.path.join(upload_dir, file.filename)
-    with open(dest_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-        
-    # [V2 INJECTION] Also ingest for V2 RAG in the background to keep databases synced
-    try:
-        import v2_rag_engine
-        os.makedirs(v2_rag_engine.V2_UPLOAD_DIR, exist_ok=True)
-        v2_dest_path = os.path.join(v2_rag_engine.V2_UPLOAD_DIR, file.filename)
-        shutil.copy2(dest_path, v2_dest_path)
-        v2_rag_engine.ingest_file_v2(v2_dest_path, file.filename)
-    except Exception as e:
-        logger.error(f"V2 Ingest side-effect failed: {str(e)}")
-        
-    return {"message": "File uploaded successfully", "filename": file.filename}
-
-@app.post("/v2/ask-your-query", response_model=AskFilesResponse)
-async def ask_your_query(
-    question: str = Form(...),
-    model: Optional[str] = Form(None),
-    session_id: Optional[str] = Form(None),
-    payload: dict = Depends(verify_token)
-):
-    if not question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty.")
-        
-    try:
-        import uuid
-        if not session_id or not session_id.strip():
-            session_id = str(uuid.uuid4())
-
-        upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_file")
-        if not os.path.exists(upload_dir) or not [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]:
-            raise HTTPException(status_code=400, detail="No file found in uploaded_file folder.")
-            
-        files_data = read_project(upload_dir)
-        
-        if not files_data:
-            raise HTTPException(status_code=400, detail="Could not read the uploaded file.")
-            
-        matched_files = search_files(question, files_data)
-
-        # ── Relevance Guard ──────────────────────────────────────────────
-        # If search_files returned nothing, it means NO relevant content
-        # was found in the document for this question.
-        # Do NOT fall back to full document — return "not available" directly
-        # without calling the LLM, to prevent hallucination.
-        if not matched_files:
-            import uuid
-            return AskFilesResponse(
-                session_id=session_id,
-                question=question,
-                answer="This detail is currently not available in our system."
-            )
-
-        # 1. Identity & Source Protection for Old API
-        question_lower = question.lower()
-        identity_triggers = ["who are you", "what are you", "where do you get", "source of", "source for", "your source", "how do you know", "where are you getting", "how u getting", "how are you getting", "getting information", "from which", "from where", "which document"]
-        if any(trigger in question_lower for trigger in identity_triggers):
-            import uuid
-            return AskFilesResponse(
-                session_id=session_id or str(uuid.uuid4()),
-                question=question,
-                answer="I am the official AI Assistant for the Rajasthan Public Works Department (PWD). All information I provide is sourced natively from our secure internal system database."
-            )
-
-        history = get_file_session_history(session_id)
-            
-        prompt = (
-            "You are an AI assistant.\n"
-            "INSTRUCTION: Answer the user's question accurately. You may use the provided data to answer, and you may also use your general knowledge to answer questions.\n"
-            "IMPORTANT: Respond in the same language as the user's Question (e.g., if asked in Hindi, respond in Hindi).\n"
-            "DO NOT announce or write the name of the language in your response.\n"
-            "CRITICAL RULE: NEVER mention that you are reading a document, file, or context. Do not use words like 'document', 'PDF', 'provided text', 'this context', or 'information provided'. Answer directly as if you inherently know all the information.\n\n"
-        )
-        for f in matched_files:
-            prompt += f"FACTS:\n"
-            prompt += f["content"][:80000] + "\n\n"
-
-        if history:
-            prompt += "Prior Messages:\n"
-            for item in history:
-                prompt += f"User Question: {item['question']}\nAI Answer: {item['answer']}\n\n"
-
-        prompt += f"Current Question:\n{question}"
-        
-        if model:
-            answer = ask_ollama(prompt, model=model)
-        else:
-            answer = ask_ollama(prompt)
-
-        add_file_session_history(session_id, question, answer)
-            
-        return AskFilesResponse(
-            session_id=session_id,
-            question=question,
-            answer=answer
-        )
-            
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Error processing ask-your-query request: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-@app.post("/v2/ask-your-query-stream")
-async def ask_your_query_stream_endpoint(
-    request: Request,
-    question: str = Form(...),
-    model: Optional[str] = Form(None),
-    session_id: Optional[str] = Form(None),
-    payload: dict = Depends(verify_token)
-):
-    if not question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty.")
-        
-    try:
-        import uuid
-        if not session_id or not session_id.strip():
-            session_id = str(uuid.uuid4())
-
-        upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_file")
-        if not os.path.exists(upload_dir) or not [f for f in os.listdir(upload_dir) if os.path.isfile(os.path.join(upload_dir, f))]:
-            raise HTTPException(status_code=400, detail="No file found in uploaded_file folder.")
-            
-        files_data = read_project(upload_dir)
-        
-        if not files_data:
-            raise HTTPException(status_code=400, detail="Could not read the uploaded file.")
-            
-        matched_files = search_files(question, files_data)
-
-        # ── Relevance Guard ──────────────────────────────────────────────
-        # If search_files returned nothing, it means NO relevant content
-        # was found in the document for this question.
-        # Do NOT fall back to full document — return "not available" directly
-        # without calling the LLM, to prevent hallucination.
-        if not matched_files:
-            async def not_available_generator():
-                yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
-                yield f"event: delta\ndata: {json.dumps({'delta': 'This detail is currently not available in our system.'})}\n\n"
-            return StreamingResponse(not_available_generator(), media_type="text/event-stream")
-
-        # 1. Identity & Source Protection for Old API Stream
-        question_lower = question.lower()
-        identity_triggers = ["who are you", "what are you", "where do you get", "source of", "source for", "your source", "how do you know", "where are you getting", "how u getting", "how are you getting", "getting information", "from which", "from where", "which document"]
-        if any(trigger in question_lower for trigger in identity_triggers):
-            async def identity_generator():
-                import uuid
-                session = session_id or str(uuid.uuid4())
-                yield f"event: session\ndata: {json.dumps({'session_id': session})}\n\n"
-                yield f"event: delta\ndata: {json.dumps({'text': 'I am the official AI Assistant for the Rajasthan Public Works Department (PWD). All information I provide is sourced natively from our secure internal system database.'})}\n\n"
-                yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
-            return StreamingResponse(identity_generator(), media_type="text/event-stream")
-
-        history = get_file_session_history(session_id)
-            
-        prompt = (
-            "You are an AI assistant.\n"
-            "INSTRUCTION: Answer the user's question accurately. You may use the provided data to answer, and you may also use your general knowledge to answer questions.\n"
-            "IMPORTANT: Respond in the same language as the user's Question (e.g., if asked in Hindi, respond in Hindi).\n"
-            "DO NOT announce or write the name of the language in your response.\n"
-            "CRITICAL RULE: NEVER mention that you are reading a document, file, or context. Do not use words like 'document', 'PDF', 'provided text', 'this context', or 'information provided'. Answer directly as if you inherently know all the information.\n\n"
-        )
-        for f in matched_files:
-            prompt += f"FACTS:\n"
-            prompt += f["content"][:80000] + "\n\n"
-
-        if history:
-            prompt += "Prior Messages:\n"
-            for item in history:
-                prompt += f"User Question: {item['question']}\nAI Answer: {item['answer']}\n\n"
-
-        prompt += f"Current Question:\n{question}"
-        
-        async def event_generator():
-            try:
-                # 1. Yield session ID
-                yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
-                
-                full_answer = ""
-                # 2. Yield chunks
-                stream = ask_ollama_stream(prompt, model=model) if model else ask_ollama_stream(prompt)
-                async for chunk in stream:
-                    if await request.is_disconnected():
-                        logger.warning("Client disconnected during stream. Stopping generation.")
-                        break
-                    
-                    full_answer += chunk
-                    yield f"event: delta\ndata: {json.dumps({'text': chunk})}\n\n"
-                    
-                # 3. Add to history
-                if not await request.is_disconnected():
-                    add_file_session_history(session_id, question, full_answer)
-                    
-                    # 4. Yield done
-                    yield f"event: done\ndata: {json.dumps({'session_id': session_id})}\n\n"
-                    
-            except Exception as e:
-                logger.error("Error during streaming generation: %s", e)
-                yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
-
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream; charset=utf-8",
-            headers={
-                "X-Accel-Buffering": "no",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-            }
-        )
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Error setting up ask-your-query-stream request: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+async def serve_rag_tester():
+    from fastapi.responses import HTMLResponse
+    import os
+    ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rag_tester.html")
+    with open(ui_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 
-# ==============================================================================
-# V2 ADVANCED RAG ENDPOINTS (ChromaDB + Cross-Encoder)
-# These run side-by-side without disturbing V1 functionality
-# ==============================================================================
+@app.get("/db-tester")
+async def serve_db_tester():
+    from fastapi.responses import HTMLResponse
+    import os
+    ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db_tester.html")
+    with open(ui_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 @app.post("/upload-file")
 async def v2_upload_file_endpoint(file: UploadFile = File(...)):
-    import v2_rag_engine
     import shutil
     import os
     try:
@@ -924,13 +584,49 @@ _LEAK_PATTERNS = re.compile(
     re.IGNORECASE
 )
 
-def sanitize_answer(answer: str) -> str:
-    if _LEAK_PATTERNS.search(answer):
-        logger.warning("Sanitized a leaked internal reference in answer: %r", answer)
-        return "I am the official AI Assistant for the Rajasthan Public Works Department (PWD). All information I provide is sourced natively from our secure internal system database."
-    return answer
+# Matches lead-in phrases like "Based on the SYSTEM_DATABASE_RECORDS, " or
+# "According to SYSTEM_DATABASE_RECORDS " so they can be stripped out,
+# leaving the (otherwise correct) rest of the answer intact.
+_LEAK_PHRASE_PATTERNS = re.compile(
+    r"(according to|based on|as (?:stated|mentioned|shown|noted) in|"
+    r"(?:is |are )?mentioned in|found in|per)\s+(the\s+)?SYSTEM_DATABASE_RECORDS,?\s*",
+    re.IGNORECASE
+)
 
-AGGREGATE_KEYWORDS = ["total length", "combined length", "sum of", "total number of links", "total number of roads", "total number of bridges", "overall length"]
+# Both "can't answer" paths now return the exact same string, so there's
+# only ever one fallback message in the wild (previously sanitize_answer
+# and the system-prompt-driven fallback used two different messages).
+FALLBACK_MESSAGE = "This detail is currently not available in our system."
+
+def sanitize_answer(answer: str) -> str:
+    """
+    FIX: previously, ANY occurrence of the literal string
+    "SYSTEM_DATABASE_RECORDS" anywhere in the answer caused the ENTIRE
+    answer to be discarded and replaced with the fallback message — even
+    when the model had produced a fully correct answer and only violated
+    the "don't say 'according to the records'" style rule (e.g. "Based on
+    the SYSTEM_DATABASE_RECORDS, the steps are: 1. ..."). That was silently
+    destroying good answers.
+
+    Now: strip just the offending lead-in phrase first. Only fall back to
+    the generic message if the internal reference is still present after
+    that (a genuine leak, not just a stray citation phrase).
+    """
+    cleaned = _LEAK_PHRASE_PATTERNS.sub("", answer).strip()
+    if cleaned and cleaned[0].islower():
+        cleaned = cleaned[0].upper() + cleaned[1:]
+
+    if _LEAK_PATTERNS.search(cleaned):
+        logger.warning("Sanitized a leaked internal reference in answer: %r", answer)
+        return FALLBACK_MESSAGE
+
+    return cleaned if cleaned else FALLBACK_MESSAGE
+
+# Trimmed down to only phrasing that unambiguously asks for a *computed*
+# aggregate. "total number of bridges" etc. were removed because a document
+# can state that number directly as a fact (e.g. "5,635 bridges") — that's
+# not a computed aggregate, and the old keyword list force-refused it.
+AGGREGATE_KEYWORDS = ["total length", "combined length", "sum of", "overall length"]
 
 def is_aggregate_question(question: str) -> bool:
     q = question.lower()
@@ -942,53 +638,110 @@ async def v2_ask_your_query(
     model: Optional[str] = Form("llama3:latest"),
     session_id: Optional[str] = Form(None)
 ):
-    import v2_rag_engine
     import uuid
     import time
     import httpx
     if not question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
-        
+
     try:
         # 1. Identity & Source Protection (Intercept Conversational Questions)
         question_lower = question.lower()
-        identity_triggers = ["who are you", "what are you", "where do you get", "source of", "source for", "your source", "how do you know", "where are you getting", "how u getting", "how are you getting", "getting information", "from which", "from where", "which document", "which file", "which manual", "what file", "what document", "what manual", "how are you generating", "your data source"]
-        if any(trigger in question_lower for trigger in identity_triggers):
-            relevant_chunks = ["I am the official AI Assistant for the Rajasthan Public Works Department (PWD). All information I provide is sourced natively from our secure internal system database."]
+
+        # Generic assistant name instead of a hardcoded client (this was
+        # previously "Rajasthan Public Works Department (PWD)" regardless
+        # of which document/client was actually loaded). Override via the
+        # ASSISTANT_DISPLAY_NAME environment variable per deployment.
+        ASSISTANT_NAME = os.environ.get("ASSISTANT_DISPLAY_NAME", "the official AI Assistant")
+
+        # FIX: replaced loose substring matching with word-boundary regex
+        # patterns. The old substring check misrouted ordinary factual
+        # questions into the identity-shortcut path whenever they happened
+        # to CONTAIN a trigger phrase -- e.g. "What FILE formats are
+        # supported for importing data?" matched "what file", and "What is
+        # the default SOURCE OF exported data?" matched "source of" -- even
+        # though neither question was actually asking about the bot's
+        # identity or data source.
+        identity_trigger_patterns = [
+            r"\bwho are you\b", r"\bwhat are you\b",
+            r"\bwhere (do|are) you (get|getting)\b",
+            r"\byour (source|data source)\b",
+            r"\bsource (of|for) (your|this|the) (information|data|answer|response)\b",
+            r"\bhow do you know\b", r"\bhow (u|are you) getting\b",
+            r"\bgetting (this|your) information\b",
+            r"\bhow are you generating\b",
+            r"\bwhich (document|file|manual) (are you|did you|is this)\b",
+            r"\bwhat (document|file|manual) (are you|did you|is this)\b",
+            r"\bfrom (which|where) (are you|did you|do you)\b",
+        ]
+        top_score = None
+        if any(re.search(p, question_lower) for p in identity_trigger_patterns):
+            relevant_chunks = [f"I am {ASSISTANT_NAME}. All information I provide is sourced natively from our secure internal system database."]
             detected_lang = ""
         else:
             if is_aggregate_question(question):
                 return AskFilesResponse(
                     session_id=session_id or str(uuid.uuid4()),
                     question=question,
-                    answer="This detail is currently not available in our system.",
+                    answer=FALLBACK_MESSAGE,
                     time_taken=0.0
                 )
-        
+
             # 2. Advanced Retrieval + Reranking
             search_query = question
             detected_lang = v2_rag_engine.needs_translation(question)
             if detected_lang:
                 search_query = await v2_rag_engine.translate_to_english(question, model=model)
-            relevant_chunks = v2_rag_engine.retrieve_and_rerank(search_query)
-            
+
+            retrieval = v2_rag_engine.retrieve_and_rerank(search_query, question=question)
+            relevant_chunks = retrieval["chunks"]
+            top_score = retrieval["top_score"]
+            logger.info("RELEVANCE_SCORE | question=%r | top_score=%s | chunks_returned=%d",
+            question, top_score, len(relevant_chunks))
+
+            # FIX: deterministic fallback when nothing at all was retrieved,
+            # instead of leaving the LLM to freely improvise with an empty
+            # context (this is what produced the odd "I am the official AI
+            # Assistant..." style non-answers previously).
+            if not relevant_chunks:
+                return AskFilesResponse(
+                    session_id=session_id or str(uuid.uuid4()),
+                    question=question,
+                    answer=FALLBACK_MESSAGE,
+                    time_taken=0.0
+                )
+
+            # FIX: hard relevance gate. Even when chunks ARE retrieved, if
+            # the single best match is still a weak/tangential hit, don't
+            # let the model attempt an answer at all — this is what caused
+            # confident-sounding wrong one-word answers (e.g. "CSV.",
+            # "Audit.") and fabricated reasoning in testing.
+            if top_score is not None and top_score < v2_rag_engine.STRONG_RELEVANCE_THRESHOLD:
+                return AskFilesResponse(
+                    session_id=session_id or str(uuid.uuid4()),
+                    question=question,
+                    answer=FALLBACK_MESSAGE,
+                    time_taken=0.0
+                )
+
         # 3. Construct Grounded Prompt
         system_prompt = MULTILINGUAL_PROMPT_TEMPLATE
         context_text = "\n\n---\n\n".join(relevant_chunks)
         system_prompt += f"SYSTEM_DATABASE_RECORDS:\n{context_text}\n\n"
         system_prompt += "You must answer the user's question using ONLY the SYSTEM_DATABASE_RECORDS above.\n\n"
         system_prompt += "CRITICAL OUTPUT CONSTRAINTS (YOU MUST OBEY THESE OR FAIL):\n"
-        system_prompt += "- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"This detail is currently not available in our system.\"\n"
+        system_prompt += f"- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"{FALLBACK_MESSAGE}\"\n"
+        system_prompt += "- If the SYSTEM_DATABASE_RECORDS only partially answers the question, answer with what IS present and do not guess or fabricate the rest.\n"
         system_prompt += "- NEVER perform mathematical calculations or combinations.\n"
         system_prompt += "- Never use introductory phrases like \"According to the records\". Start directly with the answer.\n"
-        system_prompt += "- Do not explain your reasoning. Just output the final answer."
-        
+        system_prompt += "- Provide a complete and comprehensive answer using all relevant details from the records (especially if it is a process, list, or set of items). Do not leave out items that are present in the records."
+
         if detected_lang:
             system_prompt += f"\n\nCRITICAL MANDATORY OVERRIDE: The USER QUESTION is in {detected_lang}. You MUST write your entire response natively in {detected_lang}. Do NOT reply in English. If you reply in English, you will fail."
 
         import time
         start_time = time.time()
-        
+
         # Call Ollama
         payload = {
             "model": model,
@@ -999,16 +752,16 @@ async def v2_ask_your_query(
             "stream": False,
             "options": {"temperature": 0.0}
         }
-        
+
         async with httpx.AsyncClient() as client:
             response = await client.post("http://localhost:11434/api/chat", json=payload, timeout=180.0)
             response.raise_for_status()
             response_data = response.json()
             answer = response_data.get("message", {}).get("content", "")
             answer = sanitize_answer(answer)
-            # If question was Telugu/Hindi, translate the English answer back using aya:8b
+            # If question was Telugu/Hindi, translate the English answer back using the model
             if detected_lang:
-                answer = await v2_rag_engine.translate_from_english(answer, detected_lang)
+                answer = await v2_rag_engine.translate_from_english(answer, detected_lang, model=model)
 
         return AskFilesResponse(
             session_id=session_id or str(uuid.uuid4()),
@@ -1016,7 +769,7 @@ async def v2_ask_your_query(
             answer=answer.strip(),
             time_taken=round(time.time() - start_time, 2)
         )
-        
+
     except Exception as e:
         logger.error("V2 Ask Query Error: %s", str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -1028,7 +781,6 @@ async def v2_ask_your_query_stream(
     model: Optional[str] = Form("llama3:latest"),
     session_id: Optional[str] = Form(None)
 ):
-    import v2_rag_engine
     import uuid
     import time
     import httpx
@@ -1041,26 +793,62 @@ async def v2_ask_your_query_stream(
     try:
         # 1. Identity & Source Protection (Intercept Conversational Questions)
         question_lower = question.lower()
-        identity_triggers = ["who are you", "what are you", "where do you get", "source of", "source for", "your source", "how do you know", "where are you getting", "how u getting", "how are you getting", "getting information", "from which", "from where", "which document", "which file", "which manual", "what file", "what document", "what manual", "how are you generating", "your data source"]
-        if any(trigger in question_lower for trigger in identity_triggers):
-            relevant_chunks = ["I am the official AI Assistant for the Rajasthan Public Works Department (PWD). All information I provide is sourced natively from our secure internal system database."]
+        # FIX: replaced loose substring matching with word-boundary regex
+        # patterns. The old substring check misrouted ordinary factual
+        # questions into the identity-shortcut path whenever they happened
+        # to CONTAIN a trigger phrase -- e.g. "What FILE formats are
+        # supported for importing data?" matched "what file", and "What is
+        # the default SOURCE OF exported data?" matched "source of" -- even
+        # though neither question was actually asking about the bot's
+        # identity or data source.
+        identity_trigger_patterns = [
+            r"\bwho are you\b", r"\bwhat are you\b",
+            r"\bwhere (do|are) you (get|getting)\b",
+            r"\byour (source|data source)\b",
+            r"\bsource (of|for) (your|this|the) (information|data|answer|response)\b",
+            r"\bhow do you know\b", r"\bhow (u|are you) getting\b",
+            r"\bgetting (this|your) information\b",
+            r"\bhow are you generating\b",
+            r"\bwhich (document|file|manual) (are you|did you|is this)\b",
+            r"\bwhat (document|file|manual) (are you|did you|is this)\b",
+            r"\bfrom (which|where) (are you|did you|do you)\b",
+        ]
+        if any(re.search(p, question_lower) for p in identity_trigger_patterns):
+            ASSISTANT_NAME = os.environ.get("ASSISTANT_DISPLAY_NAME", "the official AI Assistant")
+            relevant_chunks = [f"I am {ASSISTANT_NAME}. All information I provide is sourced natively from our secure internal system database."]
             detected_lang = ""  # identity shortcut — no translation needed
         else:
             if is_aggregate_question(question):
                 async def aggregate_fallback_generator():
                     session = session_id or str(uuid.uuid4())
                     yield f"event: session\ndata: {json.dumps({'session_id': session})}\n\n"
-                    yield f"event: delta\ndata: {json.dumps({'text': 'This detail is currently not available in our system.'})}\n\n"
+                    yield f"event: delta\ndata: {json.dumps({'text': FALLBACK_MESSAGE})}\n\n"
                     yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
                 return StreamingResponse(aggregate_fallback_generator(), media_type="text/event-stream")
-        
+
             # 2. Advanced Retrieval + Reranking
             search_query = question
             detected_lang = v2_rag_engine.needs_translation(question)
             if detected_lang:
                 search_query = await v2_rag_engine.translate_to_english(question, model=model)
-            relevant_chunks = v2_rag_engine.retrieve_and_rerank(search_query)
-            
+
+            retrieval = v2_rag_engine.retrieve_and_rerank(search_query, question=question)
+            relevant_chunks = retrieval["chunks"]
+            top_score = retrieval["top_score"]
+            logger.info("RELEVANCE_SCORE | question=%r | top_score=%s | chunks_returned=%d",
+            question, top_score, len(relevant_chunks))
+
+            # Same deterministic-fallback + relevance-gate logic as the
+            # non-streaming endpoint, adapted to emit an SSE stream instead
+            # of a plain JSON response.
+            if not relevant_chunks or (top_score is not None and top_score < v2_rag_engine.STRONG_RELEVANCE_THRESHOLD):
+                async def weak_match_fallback_generator():
+                    session = session_id or str(uuid.uuid4())
+                    yield f"event: session\ndata: {json.dumps({'session_id': session})}\n\n"
+                    yield f"event: delta\ndata: {json.dumps({'text': FALLBACK_MESSAGE})}\n\n"
+                    yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
+                return StreamingResponse(weak_match_fallback_generator(), media_type="text/event-stream")
+
         # 4. Build Optimized Prompt
         prompt = MULTILINGUAL_PROMPT_TEMPLATE
         for chunk in relevant_chunks:
@@ -1071,7 +859,7 @@ async def v2_ask_your_query_stream(
         prompt += "CRITICAL OUTPUT CONSTRAINTS (YOU MUST OBEY THESE OR FAIL):\n"
         prompt += "- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"This detail is currently not available in our system.\"\n"
         prompt += "- NEVER perform mathematical calculations or combinations.\n"
-        prompt += "- Do not explain your reasoning. Just output the final answer."
+        prompt += "- Provide a complete and comprehensive answer using all relevant details from the records (especially if it is a process with steps). Do not leave out important steps."
         
         if detected_lang:
             prompt += f"\n\nCRITICAL MANDATORY OVERRIDE: The USER QUESTION is in {detected_lang}. You MUST write your entire response natively in {detected_lang}. Do NOT reply in English. If you reply in English, you will fail."
@@ -1121,7 +909,7 @@ async def v2_ask_your_query_stream(
                 elif buffer:
                     final_answer = buffer
                     if detected_lang:
-                        final_answer = await v2_rag_engine.translate_from_english(buffer, detected_lang)
+                        final_answer = await v2_rag_engine.translate_from_english(buffer, detected_lang, model=model)
                     yield f"event: delta\ndata: {json.dumps({'text': final_answer})}\n\n"
                     
                 yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
@@ -1144,7 +932,6 @@ async def v2_ask_your_query_stream(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/is-file-present")
-@app.get("/v1/is-file-present")
 async def get_current_file():
     """Returns the list of files currently loaded in the V2 system."""
     import v2_rag_engine
@@ -1156,25 +943,21 @@ async def get_current_file():
         return {"status": True, "file name": files[0]}
     return {"status": False, "file name": None}
 
-@app.get("/v2/chat")
-async def serve_v2_ui():
-    """Serves the Voice-Enabled UI for V2 RAG."""
-    from fastapi.responses import HTMLResponse
-    import os
-    ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "v2_ui.html")
-    if not os.path.exists(ui_path):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="UI file not found.")
-    with open(ui_path, "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
-
-
 # --- ADDED FOR ADMIN GLOBAL CONFIG API ---
-# from history_manager import get_business_rules (removed)
-
+from history_manager import get_business_rules, save_business_rules
 ADMIN_CONFIG_FILE = "admin_db_config.json"
 STATIC_MODEL_NAME = "qwen2.5-coder:7b"
 
+class AdminDbConfigRequest(BaseModel):
+    environment: str = "default"
+    tables: list[str]
+
+class GlobalQuestionRequest(BaseModel):
+    environment: str = "default"
+    question: str
+
+
+# @app.get("/admin/environments")
 class AdminDbConfigRequest(BaseModel):
     environment: str = "default"
     tables: list[str]
