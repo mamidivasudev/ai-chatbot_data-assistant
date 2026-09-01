@@ -18,6 +18,7 @@ Run:
 """
 
 import os
+import uuid
 import logging
 from datetime import datetime, timezone
 import tempfile
@@ -40,7 +41,7 @@ from pydantic import BaseModel
 
 from mssql_connector import connect_mssql
 from mssql_schema_reader import get_all_tables, get_selected_schema_text, get_table_metadata
-from schema_profiler import profile_and_render
+from schema_profiler import profile_and_render, profile_and_render_cached
 from mssql_sql_generator import generate_tsql, generate_answer_summary
 from mssql_executor import validate_tsql, execute_tsql
 import skills as skills_registry
@@ -62,7 +63,10 @@ from session_manager import (
     get_session,
     remove_session,
     get_file_session_history,
-    add_file_session_history
+    add_file_session_history,
+    get_db_chat_history,
+    add_db_chat_turn,
+    clear_db_chat_history,
 )
 from cryptography.fernet import Fernet
 
@@ -95,6 +99,11 @@ def rag_engine():
 # ─────────────────────────────────────────────
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production")
 ALGORITHM = "HS256"
+
+# Operator-only switch for /fetch-answer diagnostics (server, database, tables,
+# raw rows, active skills). Leave unset in production: the answer payload should
+# never carry infrastructure details to a caller.
+FETCH_ANSWER_DEBUG = os.environ.get("FETCH_ANSWER_DEBUG", "").strip().lower() in ("1", "true", "yes")
 
 ENCRYPTION_KEY_FILE = "encryption_secret.key"
 
@@ -807,6 +816,9 @@ class AdminDbConfigRequest(BaseModel):
 class GlobalQuestionRequest(BaseModel):
     environment: str = "default"
     question: str
+    # Pass the same session_id across turns so follow-ups ("name of it") resolve.
+    # Omit it and the request is treated as a fresh, standalone question.
+    session_id: Optional[str] = None
 
 
 # /env-list is an alias for /admin/environments — same handler, same response —
@@ -980,9 +992,11 @@ def ask_global_db_query(request: GlobalQuestionRequest):
         schema_text = get_selected_schema_text(conn, tables_tuple)
 
         # Rules derived from the ticked tables themselves, so a newly selected
-        # table is usable without anyone hand-authoring a rule for it.
-        dynamic_rules, schema_profile = profile_and_render(
-            conn, tables_tuple, get_table_metadata
+        # table is usable without anyone hand-authoring a rule for it. Cached:
+        # the DISTINCT/GROUP BY probes are the same on every question.
+        dynamic_rules, schema_profile = profile_and_render_cached(
+            conn, tables_tuple, get_table_metadata,
+            cache_key=(config["server"], config["database"], tuple(map(tuple, tables_tuple))),
         )
 
         db_identifier_env = f"{request.environment}_MS SQL_{config['database']}"
@@ -999,6 +1013,10 @@ def ask_global_db_query(request: GlobalQuestionRequest):
         examples_text, examples_used = load_examples_for_prompt(
             question, db_identifier=db_identifier_env, schema_text=schema_text
         )
+
+        # Prior turns for this session, so a follow-up can resolve "it"/"that".
+        session_id = request.session_id or str(uuid.uuid4())
+        history = get_db_chat_history(request.session_id) if request.session_id else []
         logger.info(
             "Answering against %s/%s (env=%s) tables=%s skills=%s",
             config["server"],
@@ -1016,6 +1034,7 @@ def ask_global_db_query(request: GlobalQuestionRequest):
             db_identifier=db_identifier_env,
             dynamic_rules=dynamic_rules,
             examples_text=examples_text,
+            history=history,
         )
         if not sql_query:
              raise HTTPException(status_code=500, detail="Failed to generate SQL.")
@@ -1033,29 +1052,50 @@ def ask_global_db_query(request: GlobalQuestionRequest):
         logger.info("Generating natural language answer...")
         answer = generate_answer_summary(question, sql_query, columns, rows, model=STATIC_MODEL_NAME, simple_mode=True)
         
-        return {
+        add_db_chat_turn(session_id, question, sql_query, answer)
+
+        # Provenance is logged server-side on every request, so a wrong answer
+        # can still be traced to the database that produced it — but it is not
+        # returned to the caller, where a server IP and raw rows do not belong.
+        logger.info(
+            "answered env=%s server=%s db=%s tables=%s rows=%d skills=%s session=%s",
+            request.environment, config["server"], config["database"],
+            tables_tuple, len(rows), [s["id"] for s in active_skills], session_id,
+        )
+
+        response = {
             "question": question,
             "sql": sql_query,
             "answer": answer,
-            # Provenance: the answer is only meaningful relative to the target
-            # it was actually executed against.
-            "environment": request.environment,
-            "server": config["server"],
-            "database": config["database"],
-            "tables": [".".join(t) for t in tables_tuple],
-            "active_skills": [s["id"] for s in active_skills],
-            "read_only_connection": (
-                None if not privileges.get("known") else not privileges["write_capable"]
-            ),
-            "schema_rules": {
-                "soft_deletes": schema_profile.get("soft_deletes", []),
-                "joins": schema_profile.get("joins", []),
-                "enums": schema_profile.get("enums", []),
-            },
-            "columns": columns,
-            "rows": [list(r) for r in rows[:100]],
             "row_count": len(rows),
+            "session_id": session_id,
         }
+
+        # Diagnostics are an operator switch, never a caller's choice — a client
+        # must not be able to ask the API to reveal the server IP, table names
+        # or raw rows. Off unless FETCH_ANSWER_DEBUG is set on the host.
+        if FETCH_ANSWER_DEBUG:
+            response["debug"] = {
+                "environment": request.environment,
+                "server": config["server"],
+                "database": config["database"],
+                "tables": [".".join(t) for t in tables_tuple],
+                "active_skills": [s["id"] for s in active_skills],
+                "examples_used": [e["question"] for e in examples_used],
+                "history_turns": len(history),
+                "read_only_connection": (
+                    None if not privileges.get("known") else not privileges["write_capable"]
+                ),
+                "schema_rules": {
+                    "soft_deletes": schema_profile.get("soft_deletes", []),
+                    "joins": schema_profile.get("joins", []),
+                    "enums": schema_profile.get("enums", []),
+                },
+                "columns": columns,
+                "rows": [list(r) for r in rows[:100]],
+            }
+
+        return response
 
     except HTTPException:
         raise
@@ -1211,6 +1251,13 @@ def admin_save_business_rules(req: SaveRulesRequest):
         raise HTTPException(status_code=500, detail=f"Failed to save rules: {e}")
 
     return {"status": "success", "scope": scope, "skill": new_skill}
+
+
+@app.post("/fetch-answer/reset-session")
+def reset_chat_session(session_id: str):
+    """Forget a conversation, so the next question starts with no history."""
+    clear_db_chat_history(session_id)
+    return {"status": "cleared", "session_id": session_id}
 
 
 class QueryExample(BaseModel):

@@ -8,6 +8,7 @@ SESSION_TTL = 86400  # 24 hours in seconds
 
 active_sessions = {}
 file_sessions = {}
+db_chat_sessions = {}
 
 def cleanup_sessions():
     now = time.time()
@@ -18,6 +19,10 @@ def cleanup_sessions():
     expired_file = [sid for sid, data in file_sessions.items() if now - data["timestamp"] > SESSION_TTL]
     for sid in expired_file:
         file_sessions.pop(sid, None)
+
+    expired_chat = [sid for sid, data in db_chat_sessions.items() if now - data["timestamp"] > SESSION_TTL]
+    for sid in expired_chat:
+        db_chat_sessions.pop(sid, None)
 
 def create_session(connection_info):
     cleanup_sessions()
@@ -50,6 +55,44 @@ def get_file_session_history(session_id: str) -> list:
     return []
 
 
+# ---------------------------------------------------------------------------
+# Database chat sessions
+#
+# /fetch-answer used to be stateless, so a follow-up such as "name of it" had
+# no antecedent and produced SCHEMA_INSUFFICIENT. These keep the recent turns.
+# ---------------------------------------------------------------------------
+MAX_DB_HISTORY = 6
+
+
+def get_db_chat_history(session_id: str) -> list:
+    cleanup_sessions()
+    if not session_id:
+        return []
+    entry = db_chat_sessions.get(session_id)
+    if not entry:
+        return []
+    entry["timestamp"] = time.time()
+    return entry["history"]
+
+
+def add_db_chat_turn(session_id: str, question: str, sql: str, answer: str,
+                     max_history: int = MAX_DB_HISTORY):
+    cleanup_sessions()
+    if not session_id:
+        return
+    entry = db_chat_sessions.setdefault(
+        session_id, {"history": [], "timestamp": time.time()}
+    )
+    entry["history"].append({"question": question, "sql": sql, "answer": answer})
+    entry["timestamp"] = time.time()
+    if len(entry["history"]) > max_history:
+        entry["history"] = entry["history"][-max_history:]
+
+
+def clear_db_chat_history(session_id: str):
+    db_chat_sessions.pop(session_id, None)
+
+
 def add_file_session_history(session_id: str, question: str, answer: str, max_history: int = 5):
     cleanup_sessions()
     if not session_id:
@@ -62,4 +105,4 @@ def add_file_session_history(session_id: str, question: str, answer: str, max_hi
     
     if len(file_sessions[session_id]["history"]) > max_history:
         file_sessions[session_id]["history"] = file_sessions[session_id]["history"][-max_history:]
-
+

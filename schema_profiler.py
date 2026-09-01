@@ -19,7 +19,9 @@ denied column degrades the prompt rather than failing the request.
 """
 
 import logging
+import os
 import re
+import time
 
 logger = logging.getLogger("schema_profiler")
 
@@ -304,3 +306,41 @@ def profile_and_render(conn, selected_tables, metadata_reader, sample_values=Tru
     except Exception as exc:
         logger.warning("Schema profiling failed, continuing without dynamic rules: %s", exc)
         return "", {}
+
+
+# ---------------------------------------------------------------------------
+# Caching
+#
+# Profiling issues a DISTINCT query per candidate column and a GROUP BY per flag
+# column. Schemas and lookup values change rarely, so repeating that on every
+# question is wasted latency against the database.
+# ---------------------------------------------------------------------------
+PROFILE_TTL_SECONDS = int(os.environ.get("SCHEMA_PROFILE_TTL", "900"))  # 15 minutes
+
+_profile_cache = {}
+
+
+def profile_and_render_cached(conn, selected_tables, metadata_reader,
+                              cache_key, sample_values=True, ttl=None):
+    """
+    profile_and_render with a time-boxed cache.
+
+    `cache_key` must identify the server, database and selected tables, so a
+    re-pointed environment never reuses another database's profile.
+    """
+    ttl = PROFILE_TTL_SECONDS if ttl is None else ttl
+    now = time.time()
+
+    cached = _profile_cache.get(cache_key)
+    if cached and now - cached["at"] < ttl:
+        return cached["rules"], cached["profile"]
+
+    rules, profile = profile_and_render(conn, selected_tables, metadata_reader, sample_values)
+    # Don't cache a failed profile — retry on the next request instead.
+    if profile:
+        _profile_cache[cache_key] = {"rules": rules, "profile": profile, "at": now}
+    return rules, profile
+
+
+def clear_profile_cache():
+    _profile_cache.clear()
