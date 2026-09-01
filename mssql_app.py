@@ -26,7 +26,10 @@ from mssql_schema_reader import (
 )
 from mssql_sql_generator import generate_tsql, generate_answer_summary, generate_rule_from_sql
 from mssql_executor import validate_tsql, execute_tsql
-from history_manager import init_db, save_chat, get_business_skills, save_business_skills, filter_rules_by_keywords, save_user_suggestion, get_user_suggestions, get_chat_history, clear_chat_history
+import uuid
+from history_manager import init_db, save_chat, save_user_suggestion, get_user_suggestions, get_chat_history, clear_chat_history
+# skills.json is the single source of business rules.
+import skills as skills_registry
 
 # Import unified adapters
 from db_adapters import (
@@ -534,7 +537,7 @@ for key, default in {
     "last_schema_for_questions": "",
     "pending_question": None,
     "db_identifier": "",
-    "business_rules": "",
+    "skills_scope": "",
     "project_files": [],
     "project_answer": "",
     "project_chunks": [],
@@ -694,7 +697,11 @@ with st.sidebar:
                         env = st.session_state.get('db_environment', 'dev')
                         db_ident = f"{env}_{db_type}_{conn_params.get('database') or conn_params.get('db_path') or conn_params.get('host') or 'default'}"
                         st.session_state["db_identifier"] = db_ident
-                        st.session_state["business_rules"] = get_business_skills(db_ident)
+                        # Rules are scoped by database name, shared across environments.
+                        st.session_state["skills_scope"] = (
+                            conn_params.get('database') or conn_params.get('db_path')
+                            or conn_params.get('host') or skills_registry.GLOBAL_SCOPE
+                        )
                     except Exception as exc:
                         st.error(f"Connection failed: {exc}")
 
@@ -743,7 +750,7 @@ with st.sidebar:
                 st.session_state.pop("table_multiselect", None)
                 st.session_state["chat_history"] = []
                 st.session_state["db_identifier"] = ""
-                st.session_state["business_rules"] = ""
+                st.session_state["skills_scope"] = ""
                 st.rerun()
 
     elif mode == "File Reader AI Assistant":
@@ -949,37 +956,60 @@ with tab_query:
 
     # Collapsible context panels
     with st.expander("AI Skills (Dynamic Business Rules)", expanded=False):
-        st.caption("Add categories, trigger keywords, and rules. Separate keywords with commas. Empty keywords apply globally.")
-        skills = st.session_state.get("business_rules", [])
-        
-        # Convert to a format data_editor can use
-        df_data = []
-        for s in skills:
-            df_data.append({
-                "category": s.get("category", ""),
-                "keywords": ", ".join(s.get("keywords", [])) if isinstance(s.get("keywords"), list) else s.get("keywords", ""),
-                "rule_text": s.get("rule_text", "")
-            })
+        skills_scope = st.session_state.get("skills_scope") or skills_registry.GLOBAL_SCOPE
+        st.caption(
+            f"Editing scope **{skills_scope}** — these rules apply to every environment "
+            "pointing at this database. Separate keywords with commas; leave keywords "
+            "empty to always apply. 'Requires tables' keeps a rule dormant unless those "
+            "tables are selected."
+        )
+
+        stored = skills_registry.list_skills(skills_scope)
+
+        df_data = [
+            {
+                "name": s.get("name", s.get("id", "")),
+                "keywords": ", ".join(s.get("keywords", []) or []),
+                "requires_tables": ", ".join(s.get("requires_tables", []) or []),
+                "priority": s.get("priority", 200),
+                "enabled": s.get("enabled", True),
+                "instruction": s.get("instruction", s.get("rule_text", "")),
+            }
+            for s in stored
+        ]
         if not df_data:
-            df_data.append({"category": "", "keywords": "", "rule_text": ""})
-            
+            df_data.append({"name": "", "keywords": "", "requires_tables": "",
+                            "priority": 200, "enabled": True, "instruction": ""})
+
         import pandas as pd
-        df = pd.DataFrame(df_data)
-        
-        edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="skills_editor", hide_index=True)
-        
-        if st.button("?? Save Skills"):
+        edited_df = st.data_editor(
+            pd.DataFrame(df_data), num_rows="dynamic",
+            use_container_width=True, key="skills_editor", hide_index=True,
+        )
+
+        if st.button("💾 Save Skills"):
+            # Keep each row's existing id so edits update rather than duplicate.
+            ids_by_name = {s.get("name"): s.get("id") for s in stored}
             new_skills = []
             for _, row in edited_df.iterrows():
-                cat = str(row.get("category", "")).strip()
-                r_text = str(row.get("rule_text", "")).strip()
-                if r_text:
-                    kws_raw = str(row.get("keywords", ""))
-                    kws = [k.strip() for k in kws_raw.split(",") if k.strip()]
-                    new_skills.append({"category": cat, "keywords": kws, "rule_text": r_text})
-            st.session_state["business_rules"] = new_skills
-            save_business_skills(st.session_state.get("db_identifier", ""), new_skills)
-            st.success("AI Skills saved successfully!")
+                instruction = str(row.get("instruction", "")).strip()
+                if not instruction:
+                    continue
+                name = str(row.get("name", "")).strip() or "Custom Rule"
+                keywords = [k.strip() for k in str(row.get("keywords", "")).split(",") if k.strip()]
+                tables = [t.strip() for t in str(row.get("requires_tables", "")).split(",") if t.strip()]
+                new_skills.append({
+                    "id": ids_by_name.get(name) or uuid.uuid4().hex[:8],
+                    "name": name,
+                    "enabled": bool(row.get("enabled", True)),
+                    "priority": int(row.get("priority") or 200),
+                    "match": "any" if keywords else "always",
+                    "keywords": keywords,
+                    "requires_tables": tables,
+                    "instruction": instruction,
+                })
+            skills_registry.save_scope_skills(skills_scope, new_skills)
+            st.success(f"Saved {len(new_skills)} skill(s) to scope '{skills_scope}' in skills.json")
 
     with st.expander("💡 Suggested questions", expanded=False):
         try:
@@ -1099,7 +1129,11 @@ with tab_query:
                 with st.spinner(f"Generating {query_lang_name}…"):
                     try:
                         schema_text = get_db_schema_text(conn, db_type, selected_tables)
-                        active_rules = filter_rules_by_keywords(question, st.session_state.get("db_identifier", ""))
+                        active_rules = skills_registry.load_skills(
+                            question,
+                            schema_text=schema_text,
+                            db_identifier=st.session_state.get("db_identifier", ""),
+                        )
                         sql = generate_db_query(
                             db_type, question, schema_text,
                             business_rules=active_rules,

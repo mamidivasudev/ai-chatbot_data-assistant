@@ -18,6 +18,7 @@ Run:
 """
 
 import os
+import uuid
 import logging
 from datetime import datetime, timezone
 import tempfile
@@ -39,9 +40,22 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from mssql_connector import connect_mssql
-from mssql_schema_reader import get_all_tables, get_selected_schema_text
+from mssql_schema_reader import get_all_tables, get_selected_schema_text, get_table_metadata
+from schema_profiler import profile_and_render, profile_and_render_cached
 from mssql_sql_generator import generate_tsql, generate_answer_summary
 from mssql_executor import validate_tsql, execute_tsql
+import skills as skills_registry
+from skills import describe_active_skills
+from db_privileges import enforce_read_only, describe as describe_privileges
+from query_library import (
+    add_examples,
+    parse_upload,
+    load_library,
+    save_library,
+    library_stats,
+    retrieve,
+    load_examples_for_prompt,
+)
 from ollama_client import list_ollama_models, ask_ollama, ask_ollama_stream
 from audit_logger import log_query   # see audit_logger.py
 from session_manager import (
@@ -49,15 +63,47 @@ from session_manager import (
     get_session,
     remove_session,
     get_file_session_history,
-    add_file_session_history
+    add_file_session_history,
+    get_db_chat_history,
+    add_db_chat_turn,
+    clear_db_chat_history,
 )
 from cryptography.fernet import Fernet
-import v2_rag_engine
+
+# v2_rag_engine pulls in chromadb, sentence-transformers and torch, and builds a
+# cross-encoder on import. Loading that eagerly costs a slow startup and makes
+# the database endpoints unavailable on a host without the RAG stack installed,
+# so it is imported on first use instead.
+_v2_rag_engine = None
+
+
+def rag_engine():
+    """Import v2_rag_engine on demand; 503 if the RAG dependencies are absent."""
+    global _v2_rag_engine
+    if _v2_rag_engine is None:
+        try:
+            import v2_rag_engine as _module
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Document/RAG features are unavailable on this host: "
+                    f"{exc}. Install chromadb, sentence-transformers, python-docx "
+                    "and pypdf to enable them."
+                ),
+            )
+        _v2_rag_engine = _module
+    return _v2_rag_engine
 # ─────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production")
 ALGORITHM = "HS256"
+
+# Operator-only switch for /fetch-answer diagnostics (server, database, tables,
+# raw rows, active skills). Leave unset in production: the answer payload should
+# never carry infrastructure details to a caller.
+FETCH_ANSWER_DEBUG = os.environ.get("FETCH_ANSWER_DEBUG", "").strip().lower() in ("1", "true", "yes")
 
 ENCRYPTION_KEY_FILE = "encryption_secret.key"
 
@@ -491,6 +537,7 @@ async def v2_upload_file_endpoint(file: UploadFile = File(...)):
     import shutil
     import os
     try:
+        v2_rag_engine = rag_engine()
         os.makedirs(v2_rag_engine.V2_UPLOAD_DIR, exist_ok=True)
         
         # Clear existing files in the directory so we only keep the latest
@@ -569,6 +616,7 @@ async def v2_ask_your_query(
         
             # 2. Advanced Retrieval + Reranking
             search_query = question
+            v2_rag_engine = rag_engine()
             detected_lang = v2_rag_engine.needs_translation(question)
             if detected_lang:
                 search_query = await v2_rag_engine.translate_to_english(question, model=model)
@@ -657,6 +705,7 @@ async def v2_ask_your_query_stream(
         
             # 2. Advanced Retrieval + Reranking
             search_query = question
+            v2_rag_engine = rag_engine()
             detected_lang = v2_rag_engine.needs_translation(question)
             if detected_lang:
                 search_query = await v2_rag_engine.translate_to_english(question, model=model)
@@ -747,7 +796,7 @@ async def v2_ask_your_query_stream(
 @app.get("/is-file-present")
 async def get_current_file():
     """Returns the list of files currently loaded in the V2 system."""
-    import v2_rag_engine
+    v2_rag_engine = rag_engine()
     import os
     if not os.path.exists(v2_rag_engine.V2_UPLOAD_DIR):
         return {"status": False, "file name": None}
@@ -757,7 +806,6 @@ async def get_current_file():
     return {"status": False, "file name": None}
 
 # --- ADDED FOR ADMIN GLOBAL CONFIG API ---
-from history_manager import get_business_rules, save_business_rules
 ADMIN_CONFIG_FILE = "admin_db_config.json"
 STATIC_MODEL_NAME = "qwen2.5-coder:7b"
 
@@ -768,14 +816,19 @@ class AdminDbConfigRequest(BaseModel):
 class GlobalQuestionRequest(BaseModel):
     environment: str = "default"
     question: str
+    # Pass the same session_id across turns so follow-ups ("name of it") resolve.
+    # Omit it and the request is treated as a fresh, standalone question.
+    session_id: Optional[str] = None
 
 
+# /env-list is an alias for /admin/environments — same handler, same response —
+# so callers using either path get identical results.
+@app.get("/env-list")
 @app.get("/admin/environments")
 def get_all_environments():
     if not os.path.exists(ADMIN_CONFIG_FILE):
         return {"environments": []}
     try:
-        import json
         with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             return {"environments": list(data.keys())}
@@ -855,8 +908,26 @@ def check_db_status(environment: str = "default"):
             password=decrypted_password,
             driver=config.get("driver", "ODBC Driver 17 for SQL Server")
         )
+        privileges = enforce_read_only(
+            conn,
+            server=config["server"],
+            database=config["database"],
+            username=config.get("username") or "",
+            strict=False,          # status must report the problem, not fail on it
+        )
         conn.close()
-        return {"is_configured": True, "is_connected": True, "message": "Database is configured and connection is successful."}
+
+        return {
+            "is_configured": True,
+            "is_connected": True,
+            "message": "Database is configured and connection is successful.",
+            "login_name": privileges.get("login_name"),
+            "read_only": (
+                None if not privileges.get("known") else not privileges["write_capable"]
+            ),
+            "write_grants": privileges.get("grants", []),
+            "privilege_message": describe_privileges(privileges),
+        }
         
     except Exception as e:
         return {"is_configured": True, "is_connected": False, "message": f"Connection failed: {str(e)}"}
@@ -899,18 +970,72 @@ def ask_global_db_query(request: GlobalQuestionRequest):
             driver=config.get("driver", "ODBC Driver 17 for SQL Server")
         )
         
+        # The login must not be able to write. With REQUIRE_READONLY_DB=1 this
+        # refuses the request outright; otherwise it warns once per connection.
+        privileges = enforce_read_only(
+            conn,
+            server=config["server"],
+            database=config["database"],
+            username=config.get("username") or "",
+        )
+
         logger.info("Extracting schema...")
         tables_tuple = [tuple(t) for t in config["tables"]]
+        if not tables_tuple:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Environment '{request.environment}' has no tables configured. "
+                    "Call /admin/save-db-config to select tables before asking questions."
+                ),
+            )
         schema_text = get_selected_schema_text(conn, tables_tuple)
-        
+
+        # Rules derived from the ticked tables themselves, so a newly selected
+        # table is usable without anyone hand-authoring a rule for it. Cached:
+        # the DISTINCT/GROUP BY probes are the same on every question.
+        dynamic_rules, schema_profile = profile_and_render_cached(
+            conn, tables_tuple, get_table_metadata,
+            cache_key=(config["server"], config["database"], tuple(map(tuple, tables_tuple))),
+        )
+
         db_identifier_env = f"{request.environment}_MS SQL_{config['database']}"
-        db_identifier_generic = f"MS SQL_{config['database']}"
-        business_rules = get_business_rules(db_identifier_env)
-        if not business_rules:
-            business_rules = get_business_rules(db_identifier_generic)
-        
+
+        # Record which database and skills answered this question — without
+        # this, a mis-pointed environment produces a plausible wrong number
+        # with no way to tell after the fact.
+        active_skills = describe_active_skills(
+            question, schema_text=schema_text, db_identifier=db_identifier_env
+        )
+
+        # Worked examples from the verified query library, filtered to this
+        # database and to tables present in the schema.
+        examples_text, examples_used = load_examples_for_prompt(
+            question, db_identifier=db_identifier_env, schema_text=schema_text
+        )
+
+        # Prior turns for this session, so a follow-up can resolve "it"/"that".
+        session_id = request.session_id or str(uuid.uuid4())
+        history = get_db_chat_history(request.session_id) if request.session_id else []
+        logger.info(
+            "Answering against %s/%s (env=%s) tables=%s skills=%s",
+            config["server"],
+            config["database"],
+            request.environment,
+            tables_tuple,
+            [s["id"] for s in active_skills],
+        )
+
         logger.info("Generating SQL...")
-        sql_query = generate_tsql(question, schema_text, business_rules, model=STATIC_MODEL_NAME)
+        sql_query = generate_tsql(
+            question,
+            schema_text,
+            model=STATIC_MODEL_NAME,
+            db_identifier=db_identifier_env,
+            dynamic_rules=dynamic_rules,
+            examples_text=examples_text,
+            history=history,
+        )
         if not sql_query:
              raise HTTPException(status_code=500, detail="Failed to generate SQL.")
              
@@ -927,11 +1052,50 @@ def ask_global_db_query(request: GlobalQuestionRequest):
         logger.info("Generating natural language answer...")
         answer = generate_answer_summary(question, sql_query, columns, rows, model=STATIC_MODEL_NAME, simple_mode=True)
         
-        return {
+        add_db_chat_turn(session_id, question, sql_query, answer)
+
+        # Provenance is logged server-side on every request, so a wrong answer
+        # can still be traced to the database that produced it — but it is not
+        # returned to the caller, where a server IP and raw rows do not belong.
+        logger.info(
+            "answered env=%s server=%s db=%s tables=%s rows=%d skills=%s session=%s",
+            request.environment, config["server"], config["database"],
+            tables_tuple, len(rows), [s["id"] for s in active_skills], session_id,
+        )
+
+        response = {
             "question": question,
             "sql": sql_query,
-            "answer": answer
+            "answer": answer,
+            "row_count": len(rows),
+            "session_id": session_id,
         }
+
+        # Diagnostics are an operator switch, never a caller's choice — a client
+        # must not be able to ask the API to reveal the server IP, table names
+        # or raw rows. Off unless FETCH_ANSWER_DEBUG is set on the host.
+        if FETCH_ANSWER_DEBUG:
+            response["debug"] = {
+                "environment": request.environment,
+                "server": config["server"],
+                "database": config["database"],
+                "tables": [".".join(t) for t in tables_tuple],
+                "active_skills": [s["id"] for s in active_skills],
+                "examples_used": [e["question"] for e in examples_used],
+                "history_turns": len(history),
+                "read_only_connection": (
+                    None if not privileges.get("known") else not privileges["write_capable"]
+                ),
+                "schema_rules": {
+                    "soft_deletes": schema_profile.get("soft_deletes", []),
+                    "joins": schema_profile.get("joins", []),
+                    "enums": schema_profile.get("enums", []),
+                },
+                "columns": columns,
+                "rows": [list(r) for r in rows[:100]],
+            }
+
+        return response
 
     except HTTPException:
         raise
@@ -953,6 +1117,13 @@ class SaveRulesRequest(BaseModel):
     rules_text: str
     keywords: list[str] = ["*"]
     skill_name: str = "Custom Rule"
+    # Which databases the rule applies to. "*" is the global scope; use a
+    # database name (e.g. "Hims_Zrams") to keep domain rules off other schemas.
+    scope: str = "*"
+    # Tables the rule references. The rule stays dormant unless all of them are
+    # in the schema handed to the model.
+    requires_tables: list[str] = []
+    priority: int = 200
 
 @app.post("/admin/generate-rule")
 def admin_generate_rule(req: GenerateRuleRequest):
@@ -994,58 +1165,188 @@ Correct SQL Query:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/admin/get-business-rules")
-def admin_get_business_rules(database_identifier: str, environment: str = "default"):
-    import json
-    import os
-    rules_file = "skills.json"
-    if not os.path.exists(rules_file):
-        return {"rules_text": ""}
-        
+SKILLS_FILE = skills_registry.SKILLS_FILE
+
+
+def _read_skills_document() -> dict:
+    """Read skills.json, normalising a legacy v1 document to the v2 shape."""
+    if not os.path.exists(SKILLS_FILE):
+        return {"version": 2, "scopes": {}}
+
     try:
-        with open(rules_file, "r", encoding="utf-8") as f:
-            all_rules = json.load(f)
-            
-        # Combine all global skills into one string for backward compatibility with frontend
-        registry = all_rules.get("global", [])
-        rules = "\n".join([s.get("instruction", "") for s in registry])
-        return {"rules_text": rules}
+        with open(SKILLS_FILE, "r", encoding="utf-8") as f:
+            doc = json.load(f)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read rules: {e}")
 
+    if not isinstance(doc, dict):
+        return {"version": 2, "scopes": {}}
+
+    if not isinstance(doc.get("scopes"), dict):
+        # v1: {"global": [...]} — the flat list was applied to every database.
+        doc = {"version": 2, "scopes": {"*": doc.get("global", []) or []}}
+
+    doc.setdefault("version", 2)
+    doc.setdefault("scopes", {})
+    return doc
+
+
+@app.get("/admin/get-business-rules")
+def admin_get_business_rules(database_identifier: str = "", environment: str = "default"):
+    """
+    Rules that would apply to `database_identifier`.
+
+    `rules_text` stays for the existing frontend; `skills` carries the
+    structured registry (scope, keywords, table gating) the v2 format adds.
+    """
+    doc = _read_skills_document()
+
+    identifier = database_identifier or ""
+    applicable = skills_registry.resolve_scopes(identifier) if identifier else ["*"]
+
+    skills_out = []
+    for scope in applicable:
+        for skill in doc["scopes"].get(scope, []):
+            if isinstance(skill, dict):
+                skills_out.append(dict(skill, scope=scope))
+
+    return {
+        "rules_text": "\n".join(s.get("instruction", "") for s in skills_out),
+        "skills": skills_out,
+        "scopes_applied": applicable,
+        "available_scopes": sorted(doc["scopes"].keys()),
+    }
+
+
 @app.post("/admin/save-business-rules")
 def admin_save_business_rules(req: SaveRulesRequest):
-    import json
-    import os
-    rules_file = "skills.json"
-    all_rules = {}
-    
-    if os.path.exists(rules_file):
-        try:
-            with open(rules_file, "r", encoding="utf-8") as f:
-                all_rules = json.load(f)
-        except Exception:
-            pass
-            
-    if "global" not in all_rules:
-        all_rules["global"] = []
-        
-    # Append as a new skill object
+    """Append one skill to a scope. Default scope "*" applies to every database."""
+    if not req.rules_text.strip():
+        raise HTTPException(status_code=400, detail="rules_text cannot be empty.")
+
+    doc = _read_skills_document()
+    scope = (req.scope or "*").strip() or "*"
+    doc["scopes"].setdefault(scope, [])
+
+    keywords = [k.strip() for k in req.keywords if k and k.strip() and k.strip() != "*"]
+
     import uuid
     new_skill = {
         "id": str(uuid.uuid4())[:8],
         "name": req.skill_name,
-        "keywords": req.keywords,
-        "instruction": req.rules_text
+        "enabled": True,
+        "priority": req.priority,
+        # No keywords means the rule is unconditional within its scope.
+        "match": "any" if keywords else "always",
+        "keywords": keywords,
+        "requires_tables": [t.strip() for t in req.requires_tables if t and t.strip()],
+        "instruction": req.rules_text.strip(),
     }
-    all_rules["global"].append(new_skill)
-    
+    doc["scopes"][scope].append(new_skill)
+
     try:
-        with open(rules_file, "w", encoding="utf-8") as f:
-            json.dump(all_rules, f, indent=4)
-        return {"status": "success"}
+        with open(SKILLS_FILE, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=4, ensure_ascii=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save rules: {e}")
+
+    return {"status": "success", "scope": scope, "skill": new_skill}
+
+
+@app.post("/fetch-answer/reset-session")
+def reset_chat_session(session_id: str):
+    """Forget a conversation, so the next question starts with no history."""
+    clear_db_chat_history(session_id)
+    return {"status": "cleared", "session_id": session_id}
+
+
+class QueryExample(BaseModel):
+    question: str
+    sql: str
+    database: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ImportQueriesRequest(BaseModel):
+    examples: list[QueryExample]
+    # Which databases these apply to. "*" means every database.
+    scope: str = "*"
+
+
+@app.post("/admin/query-library/import")
+def import_query_library(req: ImportQueriesRequest):
+    """
+    Bulk-load verified (question, SQL) pairs as few-shot examples.
+
+    Every SQL is checked by the read-only guard; a pair containing a write is
+    rejected with a reason rather than becoming an example the model imitates.
+    """
+    pairs = [e.model_dump() if hasattr(e, "model_dump") else e.dict() for e in req.examples]
+    report = add_examples(pairs, scope=req.scope, source="api")
+    report.pop("added_examples", None)
+    return report
+
+
+@app.post("/admin/query-library/upload")
+async def upload_query_library(file: UploadFile = File(...), scope: str = Form("*")):
+    """Same as /import, but takes the support team's .csv, .xlsx or .json file."""
+    try:
+        content = await file.read()
+        rows = parse_upload(content, file.filename)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read {file.filename}: {e}")
+
+    report = add_examples(rows, scope=scope, source=f"upload:{file.filename}")
+    report.pop("added_examples", None)
+    return report
+
+
+@app.get("/admin/query-library")
+def get_query_library(scope: Optional[str] = None):
+    """List the stored examples, optionally filtered to one scope."""
+    doc = load_library()
+    examples = doc["examples"]
+    if scope:
+        examples = [e for e in examples if e.get("scope") == scope]
+    return {"stats": library_stats(), "examples": examples}
+
+
+@app.delete("/admin/query-library/{example_id}")
+def delete_query_example(example_id: str):
+    doc = load_library()
+    before = len(doc["examples"])
+    doc["examples"] = [e for e in doc["examples"] if e.get("id") != example_id]
+    if len(doc["examples"]) == before:
+        raise HTTPException(status_code=404, detail=f"No example with id '{example_id}'.")
+    save_library(doc)
+    return {"status": "deleted", "id": example_id, "remaining": len(doc["examples"])}
+
+
+@app.get("/admin/query-library/preview")
+def preview_query_examples(question: str, database_identifier: str = "", top_k: int = 4):
+    """Which examples a question would pull in, and their similarity scores."""
+    return {
+        "question": question,
+        "examples": retrieve(question, database_identifier or None, top_k),
+    }
+
+
+@app.get("/admin/preview-skills")
+def admin_preview_skills(question: str, database_identifier: str = "", schema_text: str = ""):
+    """
+    Which skills a question would activate, and why — so a wrong rule can be
+    found without reading the generated SQL and guessing.
+    """
+    return {
+        "question": question,
+        "database_identifier": database_identifier,
+        "scopes_applied": skills_registry.resolve_scopes(database_identifier),
+        "active_skills": skills_registry.describe_active_skills(
+            question,
+            schema_text=schema_text or None,
+            db_identifier=database_identifier,
+        ),
+    }
 
 @app.get("/admin/get-all-tables")
 def admin_get_all_tables(environment: str = "default"):
