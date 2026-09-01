@@ -187,7 +187,7 @@ if st.button("Ask"):
 
             st.dataframe(
                 df,
-                use_container_width=True
+                width="stretch"
             )
 
             save_chat(

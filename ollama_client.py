@@ -1,5 +1,5 @@
 import ollama as _ollama
-from ollama import chat
+from ollama import chat, AsyncClient
 
 DEFAULT_MODEL = "qwen2.5-coder:7b"
 
@@ -17,9 +17,24 @@ def list_ollama_models():
 def ask_ollama(prompt, model=DEFAULT_MODEL):
     response = chat(
         model=model,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        options={"temperature": 0.0}
     )
     try:
         return response["message"]["content"]
     except Exception:
         return response.message.content
+
+async def ask_ollama_stream(prompt, model=DEFAULT_MODEL):
+    client = AsyncClient()
+    response = await client.chat(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        options={"temperature": 0.0},
+        stream=True
+    )
+    async for chunk in response:
+        try:
+            yield chunk["message"]["content"]
+        except Exception:
+            yield chunk.message.content

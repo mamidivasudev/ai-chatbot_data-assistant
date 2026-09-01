@@ -1,3 +1,5 @@
+"""SQL database connector utility functions."""
+
 import pyodbc
 
 
@@ -22,15 +24,13 @@ def connect_mssql(
             )
         driver = drivers[-1]
 
-    mars_str = "MARS_Connection=yes;" if driver != "SQL Server" else ""
-
     if auth_mode == "Windows Authentication":
         conn_str = (
             f"DRIVER={{{driver}}};"
             f"SERVER={server};"
             f"DATABASE={database};"
             f"Trusted_Connection=yes;"
-            f"{mars_str}"
+            f"MARS_Connection=yes;"
         )
     else:
         conn_str = (
@@ -39,7 +39,7 @@ def connect_mssql(
             f"DATABASE={database};"
             f"UID={username};"
             f"PWD={password};"
-            f"{mars_str}"
+            f"MARS_Connection=yes;"
         )
 
     conn = pyodbc.connect(conn_str, timeout=10)

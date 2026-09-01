@@ -2,11 +2,13 @@ import re
 from ollama_client import ask_ollama
 
 
-def generate_tsql(question, schema_text, model=None):
-    prompt = f"""You are a Microsoft SQL Server (T-SQL) expert.
+def generate_tsql(question, schema_text, business_rules="", model=None):
+    rules_text = f"\nCustom Business Rules:\n{business_rules}\n" if business_rules.strip() else ""
+    prompt = f"""You are a MS SQL AI Assistant Server (T-SQL) expert.
 
 Database Schema:
 {schema_text}
+{rules_text}
 
 Rules:
 1. Return ONLY a valid T-SQL SELECT statement.
@@ -42,7 +44,7 @@ Question:
     return sql
 
 
-def generate_answer_summary(question, sql, columns, rows, model=None):
+def generate_answer_summary(question, sql, columns, rows, model=None, simple_mode=False):
     """Ask Ollama to summarise query results in plain English."""
     if not rows:
         return "No records were returned for your question."
@@ -67,7 +69,43 @@ The SQL query returned these results:
 
 {table_text}
 
-Write a clear, concise natural-language answer (2–4 sentences) that directly answers the question based on the data above. Do not repeat the SQL. Do not use bullet points."""
+"""
+    if simple_mode:
+        prompt += "Write a very concise, direct answer based on the data above. NEVER start with phrases like 'According to the data' or 'Based on the provided data'. Just state the facts immediately. Do not repeat the SQL."
+    else:
+        prompt += "Write a clear, concise natural-language answer (2–4 sentences) that directly answers the question based on the data above. Do not repeat the SQL. Do not use bullet points."
+
+    prompt += "\nIMPORTANT: Always detect the language of the user's question (e.g., English, Hindi, Telugu) and write your final answer in that exact same language."
 
     kwargs = {"model": model} if model else {}
     return ask_ollama(prompt, **kwargs)
+
+
+def generate_rule_from_sql(question, sql, schema_text, model=None):
+    """Ask Ollama to deduce a business rule from a question and its correct SQL."""
+    prompt = f"""You are a database AI assistant expert. Your task is to extract a business rule from a human's question and their provided correct SQL query.
+
+Database Schema:
+{schema_text}
+
+Question:
+"{question}"
+
+Correct SQL Query:
+{sql}
+
+Instruction:
+Deduce the business rule or formula from this example. 
+Return ONLY the plain English rule as a single, concise sentence.
+Do not use bullet points, do not say "The rule is", just state the rule directly.
+For example: "To find 'Busiest' roads, filter where AADT > 10000."
+"""
+
+    kwargs = {"model": model} if model else {}
+    raw = ask_ollama(prompt, **kwargs)
+    
+    # Clean up any potential markdown or prefixes
+    rule = raw.strip()
+    rule = re.sub(r'^\d+\.\s*', '', rule)
+    rule = rule.replace('"', '').replace("'", "")
+    return rule

@@ -1,0 +1,18 @@
+{
+    "server": "192.168.1.18",
+    "database": "Hims_Zrams",
+    "username": "Sa",
+    "password": "gAAAAABqhrjlq7tpd_Eo-yGZHUTS4hs2tUPia0U-pG9zSa-PtPGp0xKpYsnthHT0E-n8sCqH0ukynx-4NagV8Eb4Tv_TKojjiw==",
+    "auth_mode": "SQL Server Authentication",
+    "driver": "",
+    "tables": [
+        [
+            "dbo",
+            "Roads"
+        ],
+        [
+            "dbo",
+            "TRAFFIC"
+        ]
+    ]
+}
