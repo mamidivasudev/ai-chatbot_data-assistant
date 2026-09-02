@@ -31,9 +31,7 @@
                 "keywords": [],
                 "requires_tables": [],
                 "instruction": "- Target Microsoft SQL Server (T-SQL).\n- Quote identifiers with square brackets: [SchemaName].[TableName].\n- Use TOP for row limiting, never LIMIT.\n- Use LIKE with % wildcards for string patterns.\n- Use T-SQL date functions: GETDATE(), DATEADD(), DATEDIFF(), FORMAT(). Never use MySQL or PostgreSQL date syntax.\n- Cast averages explicitly, e.g. CAST(AVG(metric) AS DECIMAL(10,2))."
-            }
-        ],
-        "Hims_Zrams": [
+            },
             {
                 "id": "pwd_primary_data_source",
                 "name": "Primary Data Source (RoadDetails_Vani)",
