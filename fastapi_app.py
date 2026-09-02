@@ -196,6 +196,8 @@ class ConnectRequest(BaseModel):
     password: Optional[str] = None
     driver: Optional[str] = None
 
+class ConnectEnvRequest(BaseModel):
+    environment: str
 
 class SchemaRequest(BaseModel):
     session_id: str
@@ -343,6 +345,64 @@ def connect(req: ConnectRequest, payload: dict = Depends(verify_token)):
     finally:
 
 
+        conn.close()
+
+@app.post("/connect_env", response_model=ConnectResponse)
+def connect_env(req: ConnectEnvRequest, payload: dict = Depends(verify_token)):
+    if not os.path.exists(ADMIN_CONFIG_FILE):
+        raise HTTPException(status_code=400, detail="Database is not configured. Admin must save config first.")
+        
+    try:
+        import json
+        with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
+            config_data = json.load(f)
+            config = config_data.get(req.environment)
+            if not config:
+                raise HTTPException(status_code=400, detail=f"Environment '{req.environment}' not found.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read admin config: {e}")
+        
+    cipher = get_cipher()
+    try:
+        decrypted_password = cipher.decrypt(config["password"].encode("utf-8")).decode("utf-8")
+    except Exception:
+        decrypted_password = config["password"]
+
+    conn = connect_mssql(
+        server=config["server"],
+        database=config["database"],
+        auth_mode=config.get("auth_mode", "SQL Server Authentication"),
+        username=config.get("username"),
+        password=decrypted_password,
+        driver=config.get("driver", "ODBC Driver 17 for SQL Server")
+    )
+
+    try:
+        tables = get_all_tables(conn)
+        table_labels = [f"{s}.{t}" for s, t in tables]
+
+        session_id = create_session({
+            "server": config["server"],
+            "database": config["database"],
+            "auth_mode": config.get("auth_mode", "SQL Server Authentication"),
+            "username": config.get("username"),
+            "password": decrypted_password,
+            "driver": config.get("driver", "ODBC Driver 17 for SQL Server")
+        })
+
+        return ConnectResponse(
+            session_id=session_id,
+            status="connected",
+            database=config["database"],
+            table_count=len(tables),
+            tables=table_labels,
+        )
+    except Exception as e:
+        logger.error(f"Failed to extract schema in connect_env: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to extract schema: {e}")
+    finally:
         conn.close()
 
 @app.post("/schema", response_model=SchemaResponse)
