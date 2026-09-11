@@ -638,6 +638,144 @@ async def v2_upload_file_endpoint(file: UploadFile = File(...)):
         logger.error("V2 Upload Error: %s", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/generate-doc-questions")
+async def generate_doc_questions():
+    try:
+        import v2_rag_engine
+        import httpx
+        import random
+        client = v2_rag_engine.get_chroma_client()
+        collection = client.get_or_create_collection(
+            name="rrams_multilingual_v2",
+            embedding_function=v2_rag_engine.get_embedding_function()
+        )
+        data = collection.get()
+        if not data or not data.get("documents"):
+            return {"questions": []}
+            
+        docs = data["documents"]
+        selected_docs = random.sample(docs, min(5, len(docs)))
+        sample_text = "\n".join(selected_docs)
+        
+        prompt = (
+            "Read the following text extracted from an uploaded document. "
+            "Generate exactly 20 insightful questions that a user could ask to understand this document better. "
+            "Return ONLY the questions, one per line. No preamble, no introductory text.\n\n"
+            f"Document Text:\n{sample_text}"
+        )
+        
+        payload = {
+            "model": "llama3:latest",
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.3}
+        }
+        
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.post("http://localhost:11434/api/generate", json=payload, timeout=60.0)
+            response.raise_for_status()
+            result = response.json()
+            raw_text = result.get("response", "").strip()
+            
+        questions = [q.strip() for q in raw_text.split("\n") if q.strip()]
+        return {"questions": questions}
+    except Exception as e:
+        logger.error("Error generating doc questions: %s", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/generate-excel-test")
+async def generate_excel_test():
+    try:
+        import v2_rag_engine
+        import httpx
+        import pandas as pd
+        import io
+        import json
+        import random
+        from fastapi.responses import StreamingResponse
+
+        # 1. Get Text from ChromaDB
+        client = v2_rag_engine.get_chroma_client()
+        collection = client.get_or_create_collection(
+            name="rrams_multilingual_v2",
+            embedding_function=v2_rag_engine.get_embedding_function()
+        )
+        data = collection.get()
+        if not data or not data.get("documents"):
+            raise HTTPException(status_code=400, detail="No document found in database.")
+        
+        # Combine random chunks of text for the test
+        docs = data["documents"]
+        selected_docs = random.sample(docs, min(10, len(docs)))
+        sample_text = "\n".join(selected_docs)
+
+        # 2. Prompt Ollama for JSON
+        prompt = (
+            "You are a strict examiner. Based on the following training manual text, "
+            "generate exactly 10 multiple choice questions. "
+            "You MUST respond ONLY with a valid JSON array of objects. "
+            "Do not include any Markdown formatting like ```json or any other preamble text. "
+            "Each object MUST have exactly these keys: "
+            '"Question", "Option A", "Option B", "Option C", "Option D", "Correct Answer".\n\n'
+            f"Text:\n{sample_text}"
+        )
+
+        payload = {
+            "model": "llama3:latest",
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.1},
+            "format": "json"
+        }
+
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.post("http://localhost:11434/api/generate", json=payload, timeout=120.0)
+            response.raise_for_status()
+            result = response.json()
+            raw_text = result.get("response", "").strip()
+
+        # 3. Parse JSON
+        try:
+            questions_list = json.loads(raw_text)
+        except json.JSONDecodeError:
+            # Fallback cleanup
+            clean_text = raw_text.replace("```json", "").replace("```", "").strip()
+            questions_list = json.loads(clean_text)
+            
+        # Ensure it is a flat list for Pandas to create columns correctly
+        if isinstance(questions_list, dict):
+            # If the AI wrapped it in a root key like {"questions": [...]}, extract the list
+            for key, val in questions_list.items():
+                if isinstance(val, list):
+                    questions_list = val
+                    break
+        
+        if not isinstance(questions_list, list):
+            questions_list = [questions_list]
+
+        # 4. Create Excel with Pandas
+        df = pd.DataFrame(questions_list)
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Test Questions')
+        
+        output.seek(0)
+
+        # 5. Return as Downloadable File
+        headers = {
+            'Content-Disposition': 'attachment; filename="training_test.xlsx"'
+        }
+        return StreamingResponse(
+            output, 
+            headers=headers, 
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+    except Exception as e:
+        logger.error("Error generating Excel test: %s", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
 import re
 _LEAK_PATTERNS = re.compile(
     r"SYSTEM_DATABASE_RECORDS",
@@ -910,19 +1048,19 @@ async def v2_ask_your_query_stream(
                 return StreamingResponse(weak_match_fallback_generator(), media_type="text/event-stream")
 
         # 4. Build Optimized Prompt
-        prompt = MULTILINGUAL_PROMPT_TEMPLATE
-        for chunk in relevant_chunks:
-            prompt += f"SYSTEM_DATABASE_RECORDS:\n{chunk}\n\n"
-            
-        prompt += f"USER QUESTION: {question}\n"
-        prompt += "You must answer the user's question using ONLY the SYSTEM_DATABASE_RECORDS above.\n\n"
-        prompt += "CRITICAL OUTPUT CONSTRAINTS (YOU MUST OBEY THESE OR FAIL):\n"
-        prompt += "- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"This detail is currently not available in our system.\"\n"
-        prompt += "- NEVER perform mathematical calculations or combinations.\n"
-        prompt += "- Provide a complete and comprehensive answer using all relevant details from the records (especially if it is a process with steps). Do not leave out important steps."
+        system_prompt = MULTILINGUAL_PROMPT_TEMPLATE
+        context_text = "\n\n---\n\n".join(relevant_chunks)
+        system_prompt += f"SYSTEM_DATABASE_RECORDS:\n{context_text}\n\n"
+        system_prompt += "You must answer the user's question using ONLY the SYSTEM_DATABASE_RECORDS above.\n\n"
+        system_prompt += "CRITICAL OUTPUT CONSTRAINTS (YOU MUST OBEY THESE OR FAIL):\n"
+        system_prompt += f"- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"{FALLBACK_MESSAGE}\"\n"
+        system_prompt += "- If the SYSTEM_DATABASE_RECORDS only partially answers the question, answer with what IS present and do not guess or fabricate the rest.\n"
+        system_prompt += "- NEVER perform mathematical calculations or combinations.\n"
+        system_prompt += "- Never use introductory phrases like \"According to the records\". Start directly with the answer.\n"
+        system_prompt += "- Provide a complete and comprehensive answer using all relevant details from the records (especially if it is a process, list, or set of items). Do not leave out items that are present in the records."
         
         if detected_lang:
-            prompt += f"\n\nCRITICAL MANDATORY OVERRIDE: The USER QUESTION is in {detected_lang}. You MUST write your entire response natively in {detected_lang}. Do NOT reply in English. If you reply in English, you will fail."
+            system_prompt += f"\n\nCRITICAL MANDATORY OVERRIDE: The USER QUESTION is in {detected_lang}. You MUST write your entire response natively in {detected_lang}. Do NOT reply in English. If you reply in English, you will fail."
 
         # 5. Stream from Ollama via httpx
         async def event_generator():
@@ -931,7 +1069,10 @@ async def v2_ask_your_query_stream(
             
             payload = {
                 "model": model,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": question}
+                ],
                 "stream": True,
                 "options": {"temperature": 0.0}
             }

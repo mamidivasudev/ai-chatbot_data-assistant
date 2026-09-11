@@ -30,5 +30,23 @@
                 "Roads"
             ]
         ]
+    },
+    "HIMS_RRAMS": {
+        "server": "192.168.1.19",
+        "database": "HIMS_RRAMS",
+        "username": "Sa",
+        "password": "gAAAAABql69zkSf8I2TcHZ_HLk0P9ddll-jJV5LBKnngucoO8Z_rUg59pg8RYIUiMsjyqdpgPIcNDu6DgIHNq6CB63BSknyehA==",
+        "auth_mode": "SQL Server Authentication",
+        "driver": "",
+        "tables": [
+            [
+                "dbo",
+                "RoadMaster"
+            ],
+            [
+                "dbo",
+                "BMSBridgeDetails"
+            ]
+        ]
     }
 }
