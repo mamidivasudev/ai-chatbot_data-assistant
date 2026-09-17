@@ -41,7 +41,7 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from mssql_connector import connect_mssql
-from mssql_schema_reader import get_all_tables, get_selected_schema_text, get_table_metadata
+from mssql_schema_reader import get_all_tables, get_all_tables_and_views, get_selected_schema_text, get_table_metadata
 from schema_profiler import profile_and_render, profile_and_render_cached
 from mssql_sql_generator import generate_tsql, generate_answer_summary, render_error_feedback
 from mssql_executor import validate_tsql, execute_tsql
@@ -221,6 +221,8 @@ class ConnectResponse(BaseModel):
     database: str
     table_count: int
     tables: list[str]
+    view_count: int = 0
+    views: list[str] = []
 
 class SchemaResponse(BaseModel):
     schema_text: str
@@ -289,12 +291,14 @@ def connect(req: ConnectRequest, payload: dict = Depends(verify_token)):
 
     try:
 
-        tables = get_all_tables(conn)
-
-        table_labels = [
-            f"{s}.{t}"
-            for s, t in tables
-        ]
+        raw_items = get_all_tables_and_views(conn)
+        tables = []
+        views = []
+        for s, t, ttype in raw_items:
+            if ttype == 'VIEW':
+                views.append(f"{s}.{t}")
+            else:
+                tables.append(f"{s}.{t}")
 
         session_id = create_session({
             "server": req.server,
@@ -320,26 +324,23 @@ def connect(req: ConnectRequest, payload: dict = Depends(verify_token)):
         }
         
         try:
-            import json
-            existing_config = {}
-            if os.path.exists(ADMIN_CONFIG_FILE):
-                try:
-                    with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as _f:
-                        existing_config = json.load(_f)
-                except Exception:
-                    pass
-            existing_config[req.environment] = initial_config
-            with open(ADMIN_CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(existing_config, f, indent=4)
-        except Exception as e:
-            logger.error(f"Failed to save initial admin config: {e}")
+            with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except Exception:
+            config_data = {}
+            
+        config_data["default"] = initial_config
+        with open(ADMIN_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=4)
 
         return ConnectResponse(
             session_id=session_id,
             status="connected",
             database=req.database,
             table_count=len(tables),
-            tables=table_labels,
+            tables=tables,
+            view_count=len(views),
+            views=views
         )
 
     finally:
@@ -380,8 +381,14 @@ def connect_env(req: ConnectEnvRequest, payload: dict = Depends(verify_token)):
     )
 
     try:
-        tables = get_all_tables(conn)
-        table_labels = [f"{s}.{t}" for s, t in tables]
+        raw_items = get_all_tables_and_views(conn)
+        tables = []
+        views = []
+        for s, t, ttype in raw_items:
+            if ttype == 'VIEW':
+                views.append(f"{s}.{t}")
+            else:
+                tables.append(f"{s}.{t}")
 
         session_id = create_session({
             "server": config["server"],
@@ -397,7 +404,9 @@ def connect_env(req: ConnectEnvRequest, payload: dict = Depends(verify_token)):
             status="connected",
             database=config["database"],
             table_count=len(tables),
-            tables=table_labels,
+            tables=tables,
+            view_count=len(views),
+            views=views
         )
     except Exception as e:
         logger.error(f"Failed to extract schema in connect_env: {e}")
@@ -2060,11 +2069,17 @@ def admin_get_all_tables(environment: str = "default"):
             driver=config.get("driver", "ODBC Driver 17 for SQL Server")
         )
         
-        tables = get_all_tables(conn)
+        raw_items = get_all_tables_and_views(conn)
         conn.close()
         
-        table_labels = [f"{s}.{t}" for s, t in tables]
-        return {"status": "success", "tables": table_labels}
+        tables = []
+        views = []
+        for s, t, ttype in raw_items:
+            if ttype == 'VIEW':
+                views.append(f"{s}.{t}")
+            else:
+                tables.append(f"{s}.{t}")
+        return {"status": "success", "tables": tables, "views": views}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch tables: {e}")

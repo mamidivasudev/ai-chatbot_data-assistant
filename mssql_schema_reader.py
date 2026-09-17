@@ -4,12 +4,25 @@ def get_all_tables(conn):
     cursor.execute("""
         SELECT TABLE_SCHEMA, TABLE_NAME
         FROM INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_TYPE = 'BASE TABLE'
+        WHERE TABLE_TYPE IN ('BASE TABLE', 'VIEW')
         ORDER BY TABLE_SCHEMA, TABLE_NAME
     """)
     tables = cursor.fetchall()
     cursor.close()
     return [(row[0], row[1]) for row in tables]
+
+def get_all_tables_and_views(conn):
+    """Return list of (schema, table_name, type) tuples from the database."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_TYPE IN ('BASE TABLE', 'VIEW')
+        ORDER BY TABLE_SCHEMA, TABLE_NAME
+    """)
+    results = cursor.fetchall()
+    cursor.close()
+    return [(row[0], row[1], row[2].strip().upper()) for row in results]
 
 
 def get_primary_keys(conn, schema, table):
