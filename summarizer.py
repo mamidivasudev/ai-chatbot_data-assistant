@@ -166,11 +166,26 @@ def _condition_groups(labels: list[str]) -> dict[str, list[str]]:
     return groups
 
 
+# Averages, rates and indices do not add up: a total or share of "AxelAvg" or
+# "IRI" per zone is meaningless. Field names are split on camelCase and
+# underscores first, so "AxelAvg" reads as "Axel Avg".
+_NON_ADDITIVE_WORD = re.compile(r"\b(avg|average|mean|median|rate|ratio|percent|pct|index|score|iri|pci|bci)\b",
+                                re.IGNORECASE)
+
+
+def is_additive(*names: str) -> bool:
+    for name in names:
+        words = re.sub(r"([a-z])([A-Z])", r"\1 \2", name or "").replace("_", " ")
+        if "%" in words or _NON_ADDITIVE_WORD.search(words):
+            return False
+    return True
+
+
 def _category_series(name: str, points: list[tuple[str, float]],
-                     groups: Optional[dict[str, list[str]]]) -> dict:
+                     groups: Optional[dict[str, list[str]]], additive: bool = True) -> dict:
     total = sum(value for _, value in points)
     # Shares only mean something when the values are parts of one positive whole.
-    has_shares = total > 0 and all(value >= 0 for _, value in points)
+    has_shares = additive and total > 0 and all(value >= 0 for _, value in points)
 
     def item(label: str, value: float) -> dict:
         entry = {"label": label, "value": round(value, 2)}
@@ -182,15 +197,22 @@ def _category_series(name: str, points: list[tuple[str, float]],
     series = {
         "name": name,
         "count": len(points),
-        "total": round(total, 2),
+        "additive": additive,
         "items": [item(*p) for p in ranked[:MAX_LISTED_ITEMS]],
         "largest": item(*ranked[0]),
         "smallest": item(*ranked[-1]),
     }
+    if additive:
+        series["total"] = round(total, 2)
+    else:
+        series["average"] = round(total / len(points), 2)
     rest = ranked[MAX_LISTED_ITEMS:]
     if rest:
-        series["others"] = {"count": len(rest), **item("others", sum(v for _, v in rest))}
+        series["others"] = ({"count": len(rest), **item("others", sum(v for _, v in rest))} if additive
+                            else {"count": len(rest), "label": "others"})
 
+    if not additive:
+        return series  # groups are sums, which averages do not support
     values = dict(points)
     for group_name, members in (groups or _condition_groups([label for label, _ in points])).items():
         present = [m for m in members if m in values]
@@ -222,8 +244,12 @@ def _trend_series(name: str, points: list[tuple[str, float]]) -> dict:
     return series
 
 
-def _compare(first_name: str, first: dict[str, float], second_name: str, second: dict[str, float]) -> Optional[dict]:
-    """Gap between two series per label, second minus first (e.g. achieved minus target)."""
+def _compare(first_name: str, first: dict[str, float], second_name: str, second: dict[str, float],
+             additive: bool = True) -> Optional[dict]:
+    """Gap between two series per label, second minus first (e.g. achieved minus target).
+
+    Sums across labels are included only for additive series.
+    """
     common = [label for label in first if label in second]
     if not common:
         return None
@@ -236,18 +262,14 @@ def _compare(first_name: str, first: dict[str, float], second_name: str, second:
         return entry
 
     gaps = sorted((gap(label) for label in common), key=lambda g: abs(g["difference"]), reverse=True)
-    first_sum = sum(first[label] for label in common)
-    second_sum = sum(second[label] for label in common)
-    comparison = {
-        "series": [first_name, second_name],
-        "first_sum": round(first_sum, 2),
-        "second_sum": round(second_sum, 2),
-        "difference": round(second_sum - first_sum, 2),
-        "largest_gap": gaps[0],
-        "items": gaps[:MAX_LISTED_ITEMS],
-    }
-    if first_sum:
-        comparison["difference_pct"] = round((second_sum - first_sum) / abs(first_sum) * 100, 1)
+    comparison = {"series": [first_name, second_name], "largest_gap": gaps[0], "items": gaps[:MAX_LISTED_ITEMS]}
+    if additive:
+        first_sum = sum(first[label] for label in common)
+        second_sum = sum(second[label] for label in common)
+        comparison.update(first_sum=round(first_sum, 2), second_sum=round(second_sum, 2),
+                          difference=round(second_sum - first_sum, 2))
+        if first_sum:
+            comparison["difference_pct"] = round((second_sum - first_sum) / abs(first_sum) * 100, 1)
     return comparison
 
 
@@ -270,18 +292,24 @@ def chart_facts(chart: dict) -> dict:
 
     series, raw = [], []
     for field in value_fields:
-        # Rows repeating a label (one per district, say) add up under that label.
-        values: dict[str, float] = {}
+        name = names.get(field) or field
+        additive = is_additive(field, name)
+        # Rows repeating a label (one per district, say) add up under that label;
+        # averages and rates are averaged instead, since they do not add up.
+        sums: dict[str, float] = {}
+        counts: dict[str, int] = {}
         for label, row in zip(labels, rows):
             number = _to_number(row.get(field))
             if number is not None:
-                values[label] = values.get(label, 0.0) + number
-        if not values:
+                sums[label] = sums.get(label, 0.0) + number
+                counts[label] = counts.get(label, 0) + 1
+        if not sums:
             continue
-        name = names.get(field) or field
+        values = sums if additive else {label: sums[label] / counts[label] for label in sums}
         points = list(values.items())
-        series.append(_trend_series(name, points) if is_trend else _category_series(name, points, chart.get("groups")))
-        raw.append((name, values))
+        series.append(_trend_series(name, points) if is_trend
+                      else _category_series(name, points, chart.get("groups"), additive))
+        raw.append((name, values, additive))
     if not series:
         raise ValueError(f"Chart '{title}' has no numeric values in {', '.join(value_fields)}.")
 
@@ -294,7 +322,8 @@ def chart_facts(chart: dict) -> dict:
         "series": series,
     }
     if len(raw) == 2:
-        comparison = _compare(raw[0][0], raw[0][1], raw[1][0], raw[1][1])
+        (first_name, first, first_additive), (second_name, second, second_additive) = raw
+        comparison = _compare(first_name, first, second_name, second, first_additive and second_additive)
         if comparison:
             facts["comparison"] = comparison
     return facts
@@ -337,11 +366,16 @@ def render_chart_facts(facts: dict) -> str:
             if "items" in s:
                 lines.append("  Values: " + " | ".join(f"{i['label']} {_fmt(i['value'])}" for i in s["items"]))
         else:
-            lines.append(f"  Total: {_amount(s['total'], unit)} across {s['count']} categories")
+            if "total" in s:
+                lines.append(f"  Total: {_amount(s['total'], unit)} across {s['count']} categories")
+            else:
+                lines.append(f"  These are averages or rates, which do not add up; no total or shares. "
+                             f"Mean across {s['count']} categories: {_amount(s['average'], unit)}")
             lines += [f"  {i['label']}: {_amount(i['value'], unit)}{_share(i)}" for i in s["items"]]
             if "others" in s:
                 o = s["others"]
-                lines.append(f"  Other {o['count']} categories combined: {_amount(o['value'], unit)}{_share(o)}")
+                combined = f": {_amount(o['value'], unit)}{_share(o)}" if "value" in o else " not listed"
+                lines.append(f"  Other {o['count']} categories{' combined' if 'value' in o else ''}{combined}")
             lines.append(f"  Largest: {s['largest']['label']}, {_amount(s['largest']['value'], unit)}{_share(s['largest'])}")
             lines.append(f"  Smallest: {s['smallest']['label']}, {_amount(s['smallest']['value'], unit)}{_share(s['smallest'])}")
             for g in s.get("groups", []):
@@ -351,62 +385,77 @@ def render_chart_facts(facts: dict) -> str:
     c = facts.get("comparison")
     if c:
         first, second = c["series"]
-        total = _amount(c["difference"], unit, signed=True)
-        if "difference_pct" in c:
-            total += f" ({c['difference_pct']:+.1f}%)"
 
         def gap(g: dict) -> str:
             pct = f" ({g['difference_pct']:+.1f}%)" if "difference_pct" in g else ""
             return f"{g['label']} {_amount(g['difference'], unit, signed=True)}{pct}"
 
-        lines += [
-            f"Comparison, {second} minus {first}:",
-            f"  Sum of {first}: {_amount(c['first_sum'], unit)}; sum of {second}: {_amount(c['second_sum'], unit)}; difference {total}",
-            f"  Largest gap: {gap(c['largest_gap'])}",
-            "  By label: " + " | ".join(gap(g) for g in c["items"]),
-        ]
+        lines.append(f"Comparison, {second} minus {first}:")
+        if "difference" in c:
+            total = _amount(c["difference"], unit, signed=True)
+            if "difference_pct" in c:
+                total += f" ({c['difference_pct']:+.1f}%)"
+            lines.append(f"  Sum of {first}: {_amount(c['first_sum'], unit)}; sum of {second}: "
+                         f"{_amount(c['second_sum'], unit)}; difference {total}")
+        lines += [f"  Largest gap: {gap(c['largest_gap'])}", "  By label: " + " | ".join(gap(g) for g in c["items"])]
     return "\n".join(lines)
 
 
 def _cross_chart_ratios(facts_list: list[dict]) -> list[dict]:
-    """Each chart's total as a share of the largest total in the same unit.
+    """Relations between chart totals that the model cannot work out on its own.
 
-    Dashboards often cut one network several ways (by road type, by condition).
-    When those totals differ, the gap is usually coverage, such as roads not yet
-    surveyed, and the model can only point that out if the ratio is given.
+    same_total — two charts adding up to the same figure usually count the same
+    items two ways (stations by traffic band and by zone), even without a unit.
+    share — each chart's total as a share of the largest total in the same unit.
+    When a dashboard cuts one network several ways (by road type, by condition),
+    the gap is usually coverage, such as roads not yet surveyed.
     """
+    totals = [f for f in facts_list
+              if f["kind"] == "categories" and len(f["series"]) == 1 and f["series"][0].get("total", 0) > 0]
+    relations, matched = [], set()
+    for i, first in enumerate(totals):
+        for second in totals[i + 1:]:
+            a, b = first["series"][0]["total"], second["series"][0]["total"]
+            if abs(a - b) <= 0.005 * max(a, b):
+                relations.append({"kind": "same_total", "title": first["title"], "reference_title": second["title"],
+                                  "total": a, "unit": first.get("unit") or second.get("unit") or ""})
+                matched.add(frozenset((id(first), id(second))))
+
     by_unit: dict[str, list[dict]] = {}
-    for facts in facts_list:
-        if facts["kind"] == "categories" and len(facts["series"]) == 1 and facts.get("unit"):
+    for facts in totals:
+        if facts.get("unit"):
             by_unit.setdefault(facts["unit"].lower(), []).append(facts)
-    ratios = []
     for charts in by_unit.values():
         if len(charts) < 2:
             continue
         reference = max(charts, key=lambda f: f["series"][0]["total"])
         reference_total = reference["series"][0]["total"]
-        if reference_total <= 0:
-            continue
         for facts in charts:
-            if facts is reference:
+            if facts is reference or frozenset((id(facts), id(reference))) in matched:
                 continue
             total = facts["series"][0]["total"]
-            ratios.append({
-                "title": facts["title"], "total": total,
+            relations.append({
+                "kind": "share", "title": facts["title"], "total": total,
                 "reference_title": reference["title"], "reference_total": reference_total,
                 "pct": round(total / reference_total * 100, 1), "difference": round(reference_total - total, 2),
                 "unit": reference["unit"],
             })
-    return ratios
+    return relations
 
 
 def _cross_chart_line(r: dict) -> str:
+    if r["kind"] == "same_total":
+        return (f"\"{r['title']}\" and \"{r['reference_title']}\" both total {_amount(r['total'], r['unit'])}: "
+                f"they likely count the same items, broken down two ways")
     return (f"\"{r['title']}\" total ({_amount(r['total'], r['unit'])}) is {r['pct']:.1f}% of "
             f"\"{r['reference_title']}\" total ({_amount(r['reference_total'], r['unit'])}); "
             f"difference {_amount(r['difference'], r['unit'])}")
 
 
 def _cross_chart_sentence(r: dict) -> str:
+    if r["kind"] == "same_total":
+        return (f"{r['title']} and {r['reference_title']} both add up to {_readable(r['total'], r['unit'])}, "
+                f"so they likely count the same items.")
     return (f"{r['title']} covers {_readable_pct(r['pct'])} of the {r['reference_title']} total "
             f"({_readable(r['total'], r['unit'])} of {_readable(r['reference_total'], r['unit'])}).")
 
@@ -445,6 +494,17 @@ def _plain_name(name: str, unit: str) -> str:
 
 def _rule_categories(s: dict, unit: str) -> tuple[str, list[str]]:
     largest, items = s["largest"], s["items"]
+    if "total" not in s:
+        # Averages and rates: highest and lowest, never totals or shares.
+        smallest = s["smallest"]
+        headline = (f"{largest['label']} is the highest at {_readable(largest['value'], unit)}, "
+                    f"and {smallest['label']} the lowest at {_readable(smallest['value'], unit)}.")
+        points = []
+        if len(items) >= 3:
+            points.append(f"{items[1]['label']} ({_readable(items[1]['value'], unit)}) and {items[2]['label']} "
+                          f"({_readable(items[2]['value'], unit)}) come next.")
+        points.append(f"The average across {s['count']} categories is {_readable(s['average'], unit)}.")
+        return headline, points
     share = largest.get("share_pct")
     if share is not None and share > 50:
         lead = f"{largest['label']} makes up more than half of the total"
@@ -512,11 +572,13 @@ def rule_based_chart_summary(facts: dict) -> dict:
         if is_trend:
             points.append(f"{name} went from {_readable(other['first']['value'], unit)} "
                           f"to {_readable(other['last']['value'], unit)}.")
-        else:
+        elif "total" in other:
             points.append(f"{name} adds up to {_readable(other['total'], unit)}.")
+        else:
+            points.append(f"{name} averages {_readable(other['average'], unit)}.")
 
     c = facts.get("comparison")
-    if c and c["difference"]:
+    if c and c.get("difference"):
         first, second = (_plain_name(n, unit) for n in c["series"])
         gap = _readable(abs(c["difference"]), unit)
         if "difference_pct" in c:
@@ -535,7 +597,7 @@ Rules:
 - Copy every number from the facts. You may round it, but never add, subtract, divide or estimate a new number. If a comparison has no number in the facts, describe it in words.
 - Start with the most important finding. Name categories exactly as the facts name them.
 - Write for a busy manager: short sentences in plain, everyday words. Round long figures to whole numbers and percentages to at most one decimal, and say "more than half" or "about a quarter" where it reads better.
-- Refer to the measure in plain words, never as a field name or with a unit in brackets.
+- Say what the chart counts in plain words taken from its title (such as roads or stations), never a field name or a unit in brackets.
 - Do not mention the facts, JSON, these rules or how the data was prepared.
 - Write in {language}, keeping numbers as digits 0-9.
 - Use an empty list for "watch" when nothing needs attention.
@@ -543,20 +605,27 @@ Rules:
 Reply with a JSON object only:
 {"headline": "one sentence", "points": ["2 to 4 short sentences"], "watch": ["0 to 2 short sentences on what may need attention"]}"""
 
-DASHBOARD_SYSTEM = """You write the summary of a dashboard with several charts for road and bridge asset managers.
+# One sentence per chart, in chart order: a small model asked for free-form points
+# tends to pour everything into one paragraph, and fixed slots can be checked and
+# repaired one by one. "..." placeholders, so the example is not copied as text.
+DASHBOARD_SYSTEM = """You brief a busy road and bridge asset manager on a dashboard of several charts.
 
 Rules:
 - Use only the facts in the user message. Do not use outside knowledge.
 - Copy every number from the facts. You may round it, but never add, subtract, divide or estimate a new number. If a comparison has no number in the facts, describe it in words.
-- The headline covers the dashboard as a whole. Each point may draw on one chart or relate several; relate charts only through numbers listed under "Across charts".
-- Write for a busy manager: short sentences in plain, everyday words. Round long figures to whole numbers and percentages to at most one decimal, and say "more than half" or "about a quarter" where it reads better.
-- Refer to the measure in plain words, never as a field name or with a unit in brackets.
+- Say what each chart counts in plain words taken from its title (such as roads or stations), never a field name or a unit in brackets.
+- Write for a busy manager: short sentences in plain, everyday words. Round long figures to whole numbers and percentages to at most one decimal.
 - Do not mention the facts, JSON, these rules, chart numbers like [1], or how the data was prepared.
 - Write in {language}, keeping numbers as digits 0-9.
-- Use an empty list for "watch" when nothing needs attention.
+
+What to write:
+- "headline": the single most important finding on the whole dashboard, as one sentence with its key number. Not a title.
+- "charts": exactly one entry per chart, in the order given ([1], [2], ...): one sentence of at most 25 words with that chart's main finding.
+- "points": 0 to 2 sentences relating charts to each other, using only what is listed under "Across charts"; an empty list if nothing is listed.
+- "watch": 0 to 2 sentences on what may need attention; an empty list if nothing stands out.
 
 Reply with a JSON object only:
-{"headline": "one sentence", "points": ["3 to 6 short sentences, most important first"], "watch": ["0 to 3 short sentences on what may need attention"]}"""
+{"headline": "...", "charts": ["...", "..."], "points": [], "watch": []}"""
 
 
 def _parse_json_object(raw: str) -> Optional[dict]:
@@ -668,16 +737,85 @@ async def summarize_dashboard(dashboard: dict, provider, language: str = "Englis
     if cross:
         text += "\n\nAcross charts:\n" + "\n".join(f"  {line}" for line in cross)
 
-    per_chart = [rule_based_chart_summary(f) for f in facts_list]
-    fallback = {
-        "headline": per_chart[0]["headline"],
-        "points": ([p["headline"] for p in per_chart[1:]] + [_cross_chart_sentence(r) for r in ratios])[:6]
-        or per_chart[0]["points"],
-        "watch": [],
-    }
-    result = await _write_from_facts(DASHBOARD_SYSTEM, text, provider, language, fallback)
+    result = await _write_dashboard(text, facts_list, [_cross_chart_sentence(r) for r in ratios], provider, language)
     result["warnings"] = result["warnings"] + [f"Skipped: {reason}" for reason in skipped]
     return {**result, "facts": facts_list, "cross_chart": cross}
+
+
+def _as_dashboard(obj: Optional[dict], chart_count: int) -> Optional[dict]:
+    if not obj or not isinstance(obj.get("headline"), str) or not obj["headline"].strip():
+        return None
+    return {
+        "headline": obj["headline"].strip(),
+        "charts": _str_list(obj.get("charts"))[:chart_count],
+        "points": _str_list(obj.get("points"))[:3],
+        "watch": _str_list(obj.get("watch"))[:3],
+    }
+
+
+async def _write_dashboard(text: str, facts_list: list[dict], cross_sentences: list[str],
+                           provider, language: str) -> dict:
+    """Headline, one sentence per chart, cross-chart points and watch items.
+
+    Every sentence is checked against the facts. After one retry, a chart sentence
+    with a number the facts don't hold is replaced by that chart's rule-based
+    headline, so each chart always gets a correct line.
+    """
+    allowed = _allowed_values(text)
+    titles = [f["title"] for f in facts_list]
+    rule_lines = [rule_based_chart_summary(f)["headline"] for f in facts_list]
+
+    def supported(sentence: str) -> bool:
+        return not _unsupported_numbers(sentence, allowed)
+
+    def rules_only(warning: str) -> dict:
+        return {"headline": rule_lines[0], "charts": [{"title": t, "summary": s} for t, s in zip(titles, rule_lines)],
+                "points": cross_sentences[:2], "watch": [], "source": "rules", "warnings": [warning]}
+
+    system = DASHBOARD_SYSTEM.replace("{language}", language)
+    prompt, reply = text, None
+    try:
+        for attempt in range(2):
+            reply = _as_dashboard(_parse_json_object(await provider.complete(system, prompt, json_mode=True)), len(titles))
+            if reply is None:
+                prompt = f"{text}\n\nReply with the JSON object only, with keys headline, charts, points and watch."
+                continue
+            unsupported = _unsupported_numbers(
+                " ".join([reply["headline"], *reply["charts"], *reply["points"], *reply["watch"]]), allowed)
+            if not unsupported and len(reply["charts"]) == len(titles):
+                break
+            problems = []
+            if unsupported:
+                problems.append(f"used numbers that are not in these facts: {', '.join(unsupported)}")
+            if len(reply["charts"]) != len(titles):
+                problems.append(f"gave {len(reply['charts'])} chart sentences for {len(titles)} charts")
+            logger.info("Dashboard summary retried: %s", "; ".join(problems))
+            prompt = (f"{text}\n\nYour previous answer {' and '.join(problems)}. Write it again with exactly one "
+                      f"sentence per chart, using only numbers that appear above.")
+    except LLMError as exc:
+        logger.warning("Summary model unavailable, using the rule-based summary: %s", exc)
+        return rules_only("The AI model could not be reached, so this summary was built directly from the data.")
+    if reply is None:
+        return rules_only("The AI model's reply could not be used, so this summary was built directly from the data.")
+
+    repaired = not supported(reply["headline"])
+    charts = []
+    for i, title in enumerate(titles):
+        sentence = reply["charts"][i] if i < len(reply["charts"]) else ""
+        if not sentence or not supported(sentence):
+            sentence, repaired = rule_lines[i], True
+        charts.append({"title": title, "summary": sentence})
+    points = [p for p in reply["points"] if supported(p)]
+    watch = [w for w in reply["watch"] if supported(w)]
+    repaired = repaired or len(points) < len(reply["points"]) or len(watch) < len(reply["watch"])
+    return {
+        "headline": reply["headline"] if supported(reply["headline"]) else rule_lines[0],
+        "charts": charts,
+        "points": points,
+        "watch": watch,
+        "source": "llm+rules" if repaired else "llm",
+        "warnings": ["Sentences with figures that could not be verified against the data were replaced."] if repaired else [],
+    }
 
 
 # ─────────────────────────────────────────────

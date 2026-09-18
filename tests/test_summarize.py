@@ -209,6 +209,8 @@ def test_chart_summary_retries_invalid_json():
 
 def test_dashboard_summary_gives_cross_chart_coverage():
     reply = json.dumps({"headline": "Roughness data covers 81.3% of the 27,459 km network.",
+                        "charts": ["Double lane roads make up 56.5% of the network.",
+                                   "Good roads are 50.4% of the surveyed length."],
                         "points": ["5,134.28 km has no roughness rating."], "watch": []})
     provider = ScriptedProvider([reply])
     result = run(summarizer.summarize_dashboard({"title": "RIS", "charts": [ROAD_TYPE, ROUGHNESS]}, provider))
@@ -218,7 +220,69 @@ def test_dashboard_summary_gives_cross_chart_coverage():
         "(27,459 km); difference 5,134.28 km"
     ]
     assert result["source"] == "llm"
+    assert [c["title"] for c in result["charts"]] == ["Roadtype by category", "Roughness by category"]
     assert len(result["facts"]) == 2
+
+
+# Shaped like the TIS dashboard: stations per AADT band, stations per zone, average axle load per zone.
+TIS_BANDS = {"title": "Traffic distribution by category", "chart_type": "pie", "category_field": "Traffic Category",
+             "value_fields": ["AADT"], "data": [{"Traffic Category": " < 500", "AADT": 83},
+                                                {"Traffic Category": " 1000 - 2000", "AADT": 199},
+                                                {"Traffic Category": " 2000 - 5000", "AADT": 145},
+                                                {"Traffic Category": " 500 - 1000", "AADT": 152},
+                                                {"Traffic Category": " 5000 - 10000", "AADT": 12}]}
+TIS_ZONES = {"title": "No of Traffic Stations By Zone", "chart_type": "column", "category_field": "Zone",
+             "value_fields": ["StationCode"], "data": [{"Zone": "Ajmer", "StationCode": 112}, {"Zone": "Kota", "StationCode": 97},
+                                                       {"Zone": "Tonk", "StationCode": 9}, {"Zone": "Jaipur-I", "StationCode": 373}]}
+TIS_AXLE = {"title": "Axle load by zone", "chart_type": "stacked", "category_field": "Zone", "value_fields": ["AxelAvg"],
+            "data": [{"Zone": "Kota", "AxelAvg": 800}, {"Zone": "Kota", "AxelAvg": 600},
+                     {"Zone": "Tonk", "AxelAvg": 100}, {"Zone": "Ajmer", "AxelAvg": 300}]}
+
+
+def test_averages_are_not_totalled():
+    facts = summarizer.chart_facts(TIS_AXLE)
+    s = facts["series"][0]
+
+    assert summarizer.is_additive("AADT") and not summarizer.is_additive("AxelAvg")
+    assert "total" not in s and "share_pct" not in s["largest"]
+    assert s["largest"] == {"label": "Kota", "value": 700.0}  # rows for Kota averaged, not summed
+    assert "do not add up" in summarizer.render_chart_facts(facts)
+    assert summarizer.rule_based_chart_summary(facts)["headline"] == (
+        "Kota is the highest at 700, and Tonk the lowest at 100.")
+
+
+def test_charts_with_the_same_total_are_linked_without_a_unit():
+    facts = [summarizer.chart_facts(TIS_BANDS), summarizer.chart_facts(TIS_ZONES)]
+    ratios = summarizer._cross_chart_ratios(facts)
+
+    assert [summarizer._cross_chart_line(r) for r in ratios] == [
+        '"Traffic distribution by category" and "No of Traffic Stations By Zone" both total 591: '
+        "they likely count the same items, broken down two ways"]
+
+
+def test_dashboard_paragraph_reply_is_split_into_chart_lines():
+    one_paragraph = json.dumps({"headline": "TIS dashboard highlights for 2025",
+                                "charts": ["Everything in one sentence: 199 in 1000 - 2000, Ajmer 112, Kota 700."],
+                                "points": [], "watch": []})
+    provider = ScriptedProvider([one_paragraph, one_paragraph])
+    result = run(summarizer.summarize_dashboard(
+        {"title": "TIS", "filters": {"Year": "2025"}, "charts": [TIS_BANDS, TIS_ZONES, TIS_AXLE]}, provider))
+
+    assert "gave 1 chart sentences for 3 charts" in provider.calls[1]["user"]
+    assert result["source"] == "llm+rules"
+    assert [c["summary"] for c in result["charts"][1:]] == [
+        "Jaipur-I makes up more than half of the total: 373 out of 591 (63.1%).",
+        "Kota is the highest at 700, and Tonk the lowest at 100."]
+
+
+def test_dashboard_falls_back_to_one_line_per_chart():
+    provider = ScriptedProvider([LLMError("down")])
+    result = run(summarizer.summarize_dashboard({"charts": [TIS_BANDS, TIS_ZONES]}, provider))
+
+    assert result["source"] == "rules"
+    assert len(result["charts"]) == 2
+    assert result["points"] == ["Traffic distribution by category and No of Traffic Stations By Zone both add up "
+                                "to 591, so they likely count the same items."]
 
 
 # ─────────────────────────────────────────────
