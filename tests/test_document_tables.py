@@ -68,6 +68,30 @@ def test_status_counts_merge_tables_and_casing(tmp_path):
     }]
 
 
+def test_title_row_and_status_found_by_values(tmp_path):
+    """A merged title row above the header, and the status in a "Remarks" column."""
+    document = docx.Document()
+    table = document.add_table(rows=6, cols=3)
+    title = table.rows[0].cells[0].merge(table.rows[0].cells[2])
+    title.text = "1. Cell Properties Panel"
+    rows = [["S.No", "Change", "Remarks"], ["1.1", "Rename panel", "Done (20-06)"],
+            ["1.2", "Remove Identity heading", "done"], ["1.3", "Show Row and Column inputs", "In-progress"],
+            ["1.4", "Remove Duplicate button", "Pending - UI"]]
+    for row, values in zip(table.rows[1:], rows):
+        for cell, value in zip(row.cells, values):
+            cell.text = value
+    path = tmp_path / "cr.docx"
+    document.save(path)
+
+    text, tables = document_tables.read_docx(str(path))
+    assert "## Table 1: 1. Cell Properties Panel" in text
+    assert "Change: Rename panel | Remarks: Done (20-06)" in text
+    assert document_tables.status_counts(tables) == [{
+        "column": "Remarks", "total": 4,
+        "counts": [{"label": "Done", "count": 2}, {"label": "In progress", "count": 1}, {"label": "Pending", "count": 1}],
+    }]
+
+
 def test_free_text_status_column_is_ignored():
     table = [["Item", "Status notes"], ["a", "waiting on vendor"], ["b", "tested in QA"],
              ["c", "moved to next sprint"], ["d", "needs design sign-off"]]

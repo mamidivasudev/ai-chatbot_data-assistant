@@ -695,11 +695,12 @@ Rules:
 - Use only the text in the user message. Do not use outside knowledge.
 - Copy numbers, dates and names exactly as written; never compute new numbers. Counts listed under "Counted from the document's tables" are exact and may be quoted.
 - Write in {language}, in short, plain sentences, keeping numbers as digits 0-9.
+- Do not add purposes, benefits or opinions the document does not state (for example, that the changes improve the user experience).
 - Do not mention these rules, notes, tables, or "the text provided".
 
 What to write:
 - "title": a short, specific title for the document.
-- "overview": 2 to 3 sentences: what the document is, what it is for, and its overall status or outcome if stated (quote the counted statuses if given).
+- "overview": 2 to 3 sentences: what the document is, what it covers, and its overall status. Quote the counted statuses when they are given; otherwise describe status only as the document states it.
 - "key_points": 3 to 6 points. Group related items into one point per area, screen, section or theme instead of listing every line. Each point is one complete sentence.
 - "action_items": what is still to be done or decided, each a complete sentence saying what must happen, and by whom and by when if the document says so. Never output bare item or section numbers, and never start an item with a label such as "Deadlines:". Use an empty list when nothing is pending.
 

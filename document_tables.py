@@ -18,9 +18,16 @@ from typing import Optional
 
 # Header of a column whose values are statuses ("Status", "Dev Status", "Progress").
 _STATUS_HEADER = re.compile(r"\b(status|state|progress|completion)\b", re.IGNORECASE)
+# A status word inside a cell, so "Done (20-06)" counts as Done and "In-progress" as In progress.
+_STATUS_WORD = re.compile(
+    r"\b(done|completed?|closed|resolved|fixed|approved|implemented|pending|open|not[\s-]started|"
+    r"in[\s-]progress|ongoing|wip|on[\s-]hold|blocked|rejected|dropped|deferred)\b",
+    re.IGNORECASE,
+)
 MAX_STATUS_VALUES = 10  # more distinct values than this is free text, not a status
+STATUS_VALUE_SHARE = 0.6  # a column counts as status when this share of its cells hold a status word
 
-Table = list[list[str]]  # rows of cell texts; the first row is the header
+Table = list[list[str]]  # rows of cell texts; the header is found by _split_header
 
 
 def _clean(text: str) -> str:
@@ -34,9 +41,29 @@ def _table_rows(table) -> Table:
     return [row for row in rows if any(row)]
 
 
+def _split_header(rows: Table) -> tuple[list[str], list[str], Table]:
+    """(title lines, header, body). Word tables often open with a merged title row
+    ("1. Cell Properties Panel", repeated across every cell); the header is the first
+    of the top rows with at least two different cells."""
+    for i, row in enumerate(rows[:3]):
+        if len({cell for cell in row if cell}) >= 2:
+            titles = [next(cell for cell in r if cell) for r in rows[:i]]
+            return titles, row, rows[i + 1:]
+    return [], rows[0], rows[1:]
+
+
+def _status_label(value: str) -> str:
+    """The status word in a cell, tidied ("in-progress" → "In progress"); else the cell as is."""
+    match = _STATUS_WORD.search(value)
+    if not match:
+        return value
+    word = re.sub(r"[\s-]+", " ", match.group(0)).lower()
+    return word[0].upper() + word[1:]
+
+
 def _render_table(rows: Table, number: int) -> str:
-    header, body = rows[0], rows[1:]
-    lines = [f"\n## Table {number}"]
+    titles, header, body = _split_header(rows)
+    lines = [f"\n## Table {number}" + (f": {' / '.join(titles)}" if titles else "")]
     if not body:
         return "\n".join(lines + [" | ".join(cell for cell in header if cell)])
     for row in body:
@@ -115,16 +142,23 @@ def status_counts(tables: list[Table]) -> list[dict]:
     """
     columns: dict[str, dict] = {}
     for rows in tables:
-        if len(rows) < 3:  # a header and at least two items
+        _, header, body = _split_header(rows)
+        if len(body) < 2:
             continue
-        header = rows[0]
         for index, name in enumerate(header):
-            if not name or not _STATUS_HEADER.search(name):
-                continue
-            values = [row[index] for row in rows[1:] if index < len(row)]
+            cells = [row[index] for row in body if index < len(row)]
+            filled = [cell for cell in cells if cell]
+            with_status = sum(1 for cell in filled if _STATUS_WORD.search(cell))
+            # By its header ("Dev Status"), or by its contents when the header says
+            # something else ("Remarks" holding Done / Pending / In progress).
+            by_header = bool(name) and bool(_STATUS_HEADER.search(name))
+            by_values = len(filled) >= 3 and with_status / len(filled) >= STATUS_VALUE_SHARE
+            if not (by_header or by_values) or header.index(name) != index:
+                continue  # the second test skips merged-cell repeats of the same column
+            values = [_status_label(cell) for cell in cells]
             if _count(values) is None:
                 continue
-            entry = columns.setdefault(name.lower(), {"column": name, "values": []})
+            entry = columns.setdefault(name.lower() or "status", {"column": name or "Status", "values": []})
             entry["values"] += values
     result = []
     for entry in columns.values():
