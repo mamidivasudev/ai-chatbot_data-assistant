@@ -189,6 +189,10 @@ def verify_token():
 # /summarize/* — chart, dashboard and document summaries (summarize_api.py)
 from summarize_api import router as summarize_router
 app.include_router(summarize_router, dependencies=[Depends(verify_token)])
+
+# /diagnostics/ollama — can this API reach Ollama, and where? (diagnostics_api.py)
+from diagnostics_api import router as diagnostics_router
+app.include_router(diagnostics_router, dependencies=[Depends(verify_token)])
 # ─────────────────────────────────────────────
 # Request / Response models
 # ─────────────────────────────────────────────
