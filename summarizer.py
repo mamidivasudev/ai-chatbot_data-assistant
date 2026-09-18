@@ -598,6 +598,7 @@ Rules:
 - Start with the most important finding. Name categories exactly as the facts name them.
 - Write for a busy manager: short sentences in plain, everyday words. Round long figures to whole numbers and percentages to at most one decimal, and say "more than half" or "about a quarter" where it reads better.
 - Say what the chart counts in plain words taken from its title (such as roads or stations), never a field name or a unit in brackets.
+- Use "most" or "the majority" only for more than half; otherwise name the largest share with its percentage.
 - Do not mention the facts, JSON, these rules or how the data was prepared.
 - Write in {language}, keeping numbers as digits 0-9.
 - Use an empty list for "watch" when nothing needs attention.
@@ -615,6 +616,7 @@ Rules:
 - Copy every number from the facts. You may round it, but never add, subtract, divide or estimate a new number. If a comparison has no number in the facts, describe it in words.
 - Say what each chart counts in plain words taken from its title (such as roads or stations), never a field name or a unit in brackets.
 - Write for a busy manager: short sentences in plain, everyday words. Round long figures to whole numbers and percentages to at most one decimal.
+- Use "most" or "the majority" only for more than half; otherwise name the largest share with its percentage.
 - Do not mention the facts, JSON, these rules, chart numbers like [1], or how the data was prepared.
 - Write in {language}, keeping numbers as digits 0-9.
 
@@ -651,14 +653,35 @@ def _str_list(value: Any) -> list[str]:
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
+# A sentence end followed by the next sentence's start; "No. of stations" does not split.
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])")
+
+
+def _one_sentence_each(items: list[str]) -> list[str]:
+    """Points that pack several sentences into one string become one point each."""
+    return [part.strip() for item in items for part in _SENTENCE_BREAK.split(item) if part.strip()]
+
+
+def _is_title(text: str) -> bool:
+    """A heading ("Traffic Stations by Zone in 2025") rather than a finding: short, no full stop."""
+    return not text.rstrip().endswith((".", "!", "?")) and len(text.split()) <= 10
+
+
 def _as_summary(obj: Optional[dict]) -> Optional[dict]:
     if not obj or not isinstance(obj.get("headline"), str) or not obj["headline"].strip():
         return None
     return {
         "headline": obj["headline"].strip(),
-        "points": _str_list(obj.get("points"))[:8],
-        "watch": _str_list(obj.get("watch"))[:4],
+        "points": _one_sentence_each(_str_list(obj.get("points")))[:6],
+        "watch": _one_sentence_each(_str_list(obj.get("watch")))[:3],
     }
+
+
+def _promote_if_title(summary: dict) -> dict:
+    """A title-like headline gives way to the first point, which carries a real finding."""
+    if _is_title(summary["headline"]) and summary["points"]:
+        return {**summary, "headline": summary["points"][0], "points": summary["points"][1:]}
+    return summary
 
 
 def _keep_supported(summary: dict, allowed: list[float], fallback: dict) -> dict:
@@ -685,11 +708,16 @@ async def _write_from_facts(system: str, facts_text: str, provider, language: st
                 prompt = f"{facts_text}\n\nReply with the JSON object only, with keys headline, points and watch."
                 continue
             unsupported = _unsupported_numbers(" ".join([summary["headline"], *summary["points"], *summary["watch"]]), allowed)
-            if not unsupported:
+            if not unsupported and not _is_title(summary["headline"]):
                 return {**summary, "source": "llm", "warnings": []}
-            logger.info("Summary used numbers not in the facts, retrying: %s", unsupported)
-            prompt = (f"{facts_text}\n\nYour previous answer used numbers that are not in these facts: "
-                      f"{', '.join(unsupported)}. Write it again using only numbers that appear above.")
+            problems = []
+            if unsupported:
+                problems.append(f"used numbers that are not in these facts: {', '.join(unsupported)}")
+            if _is_title(summary["headline"]):
+                problems.append("gave a title as the headline instead of a finding")
+            logger.info("Summary retried: %s", "; ".join(problems))
+            prompt = (f"{facts_text}\n\nYour previous answer {' and '.join(problems)}. Write it again: the headline is "
+                      f"one full sentence with the main finding, using only numbers that appear above.")
     except LLMError as exc:
         logger.warning("Summary model unavailable, using the rule-based summary: %s", exc)
         return {**fallback, "source": "rules",
@@ -697,6 +725,9 @@ async def _write_from_facts(system: str, facts_text: str, provider, language: st
     if summary is None:
         return {**fallback, "source": "rules",
                 "warnings": ["The AI model's reply could not be used, so this summary was built directly from the data."]}
+    summary = _promote_if_title(summary)
+    if not _unsupported_numbers(" ".join([summary["headline"], *summary["points"], *summary["watch"]]), allowed):
+        return {**summary, "source": "llm", "warnings": []}
     return {**_keep_supported(summary, allowed, fallback), "source": "llm+rules",
             "warnings": ["Sentences with figures that could not be verified against the data were removed."]}
 
@@ -748,8 +779,8 @@ def _as_dashboard(obj: Optional[dict], chart_count: int) -> Optional[dict]:
     return {
         "headline": obj["headline"].strip(),
         "charts": _str_list(obj.get("charts"))[:chart_count],
-        "points": _str_list(obj.get("points"))[:3],
-        "watch": _str_list(obj.get("watch"))[:3],
+        "points": _one_sentence_each(_str_list(obj.get("points")))[:3],
+        "watch": _one_sentence_each(_str_list(obj.get("watch")))[:3],
     }
 
 
@@ -782,13 +813,15 @@ async def _write_dashboard(text: str, facts_list: list[dict], cross_sentences: l
                 continue
             unsupported = _unsupported_numbers(
                 " ".join([reply["headline"], *reply["charts"], *reply["points"], *reply["watch"]]), allowed)
-            if not unsupported and len(reply["charts"]) == len(titles):
+            if not unsupported and len(reply["charts"]) == len(titles) and not _is_title(reply["headline"]):
                 break
             problems = []
             if unsupported:
                 problems.append(f"used numbers that are not in these facts: {', '.join(unsupported)}")
             if len(reply["charts"]) != len(titles):
                 problems.append(f"gave {len(reply['charts'])} chart sentences for {len(titles)} charts")
+            if _is_title(reply["headline"]):
+                problems.append("gave a title as the headline instead of a finding")
             logger.info("Dashboard summary retried: %s", "; ".join(problems))
             prompt = (f"{text}\n\nYour previous answer {' and '.join(problems)}. Write it again with exactly one "
                       f"sentence per chart, using only numbers that appear above.")
@@ -798,6 +831,9 @@ async def _write_dashboard(text: str, facts_list: list[dict], cross_sentences: l
     if reply is None:
         return rules_only("The AI model's reply could not be used, so this summary was built directly from the data.")
 
+    # Still a title after the retry: a cross-chart insight makes a better headline.
+    if _is_title(reply["headline"]) and reply["points"]:
+        reply = {**reply, "headline": reply["points"][0], "points": reply["points"][1:]}
     repaired = not supported(reply["headline"])
     charts = []
     for i, title in enumerate(titles):

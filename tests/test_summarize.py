@@ -239,6 +239,18 @@ TIS_AXLE = {"title": "Axle load by zone", "chart_type": "stacked", "category_fie
                      {"Zone": "Tonk", "AxelAvg": 100}, {"Zone": "Ajmer", "AxelAvg": 300}]}
 
 
+def test_title_headline_is_retried_then_replaced_and_paragraph_split():
+    titled = json.dumps({"headline": "Traffic Stations by Zone in 2025",
+                         "points": ["Ajmer has the most stations, with 112. Kota follows with 97."], "watch": []})
+    provider = ScriptedProvider([titled, titled])
+    result = run(summarizer.summarize_chart(TIS_ZONES, provider))
+
+    assert "gave a title as the headline" in provider.calls[1]["user"]
+    assert result["headline"] == "Ajmer has the most stations, with 112."
+    assert result["points"] == ["Kota follows with 97."]
+    assert result["source"] == "llm"
+
+
 def test_averages_are_not_totalled():
     facts = summarizer.chart_facts(TIS_AXLE)
     s = facts["series"][0]
