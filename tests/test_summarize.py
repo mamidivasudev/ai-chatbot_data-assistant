@@ -171,9 +171,33 @@ def test_chart_summary_falls_back_to_rules_when_model_is_down():
     result = run(summarizer.summarize_chart(ROUGHNESS, provider))
 
     assert result["source"] == "rules"
-    assert result["headline"] == ("Good is the largest part of length at 11,249 km (50.4% of total), "
-                                  "out of 22,324.72 km in total.")
+    assert result["headline"] == "Good makes up more than half of the total: 11,249 km out of 22,325 km (50.4%)."
+    assert result["points"][:2] == ["Good and Very Good together: 12,822 km (57.4%).",
+                                    "Poor and Very Poor together: 3,164 km (14.2%)."]
     assert "connection refused" not in json.dumps(result)
+
+
+def test_rule_based_summary_reads_naturally():
+    facts = summarizer.chart_facts({**ROAD_TYPE, "series_names": {"km": "Length (km)"}})
+    summary = summarizer.rule_based_chart_summary(facts)
+
+    assert summary["headline"] == "Double lane makes up more than half of the total: 15,523 km out of 27,459 km (56.5%)."
+    assert summary["points"] == [
+        "Single lane is next with 6,057 km (22.1%), followed by Intermediate lane with 5,220 km (19%).",
+        "The other 3 categories (Four lane, 2L+PS and Six lane) add up to only 659 km (2.4%).",
+    ]
+    # A real but tiny share must not read as 0.0% in what the model sees either.
+    assert "Six lane: 2.75 km (under 0.1% of total)" in summarizer.render_chart_facts(facts)
+
+
+def test_rule_based_trend_summary():
+    chart = {"title": "Roads resurfaced", "unit": "km", "series_names": {"km": "Length (km)"},
+             "data": [{"year": "2021", "km": 100}, {"year": "2022", "km": 120},
+                      {"year": "2023", "km": 90}, {"year": "2024", "km": 150}]}
+    summary = summarizer.rule_based_chart_summary(summarizer.chart_facts(chart))
+
+    assert summary["headline"] == "Length went up from 100 km in 2021 to 150 km in 2024, a rise of 50%."
+    assert summary["points"] == ["It was highest in 2024 (150 km) and lowest in 2023 (90 km)."]
 
 
 def test_chart_summary_retries_invalid_json():

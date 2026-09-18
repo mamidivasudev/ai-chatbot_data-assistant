@@ -72,10 +72,10 @@ class OllamaProvider:
                 response.raise_for_status()
                 installed = [m.get("model") or m.get("name") for m in response.json().get("models", [])]
         except (httpx.HTTPError, ValueError) as exc:
-            return {"reachable": False, "model_available": False, "detail": str(exc)}
+            return {"host": self.host, "reachable": False, "model_available": False, "detail": str(exc)}
         # Ollama lists "llama3" as "llama3:latest".
         tagged = self.model if ":" in self.model else f"{self.model}:latest"
-        return {"reachable": True, "model_available": tagged in installed, "installed_models": installed}
+        return {"host": self.host, "reachable": True, "model_available": tagged in installed, "installed_models": installed}
 
 
 class GeminiProvider:

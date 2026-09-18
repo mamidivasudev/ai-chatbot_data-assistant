@@ -308,7 +308,11 @@ def _amount(value: float, unit: str, signed: bool = False) -> str:
 
 
 def _share(entry: dict) -> str:
-    return f" ({entry['share_pct']}% of total)" if "share_pct" in entry else ""
+    if "share_pct" not in entry:
+        return ""
+    # A real but tiny share rounds to 0.0, which reads as "none".
+    pct = "under 0.1%" if entry["share_pct"] == 0 and entry.get("value") else f"{entry['share_pct']}%"
+    return f" ({pct} of total)"
 
 
 def render_chart_facts(facts: dict) -> str:
@@ -364,7 +368,7 @@ def render_chart_facts(facts: dict) -> str:
     return "\n".join(lines)
 
 
-def _cross_chart_lines(facts_list: list[dict]) -> list[str]:
+def _cross_chart_ratios(facts_list: list[dict]) -> list[dict]:
     """Each chart's total as a share of the largest total in the same unit.
 
     Dashboards often cut one network several ways (by road type, by condition).
@@ -375,7 +379,7 @@ def _cross_chart_lines(facts_list: list[dict]) -> list[str]:
     for facts in facts_list:
         if facts["kind"] == "categories" and len(facts["series"]) == 1 and facts.get("unit"):
             by_unit.setdefault(facts["unit"].lower(), []).append(facts)
-    lines = []
+    ratios = []
     for charts in by_unit.values():
         if len(charts) < 2:
             continue
@@ -383,59 +387,141 @@ def _cross_chart_lines(facts_list: list[dict]) -> list[str]:
         reference_total = reference["series"][0]["total"]
         if reference_total <= 0:
             continue
-        unit = reference["unit"]
         for facts in charts:
             if facts is reference:
                 continue
             total = facts["series"][0]["total"]
-            lines.append(
-                f"\"{facts['title']}\" total ({_amount(total, unit)}) is {total / reference_total * 100:.1f}% of "
-                f"\"{reference['title']}\" total ({_amount(reference_total, unit)}); "
-                f"difference {_amount(reference_total - total, unit)}"
-            )
-    return lines
+            ratios.append({
+                "title": facts["title"], "total": total,
+                "reference_title": reference["title"], "reference_total": reference_total,
+                "pct": round(total / reference_total * 100, 1), "difference": round(reference_total - total, 2),
+                "unit": reference["unit"],
+            })
+    return ratios
+
+
+def _cross_chart_line(r: dict) -> str:
+    return (f"\"{r['title']}\" total ({_amount(r['total'], r['unit'])}) is {r['pct']:.1f}% of "
+            f"\"{r['reference_title']}\" total ({_amount(r['reference_total'], r['unit'])}); "
+            f"difference {_amount(r['difference'], r['unit'])}")
+
+
+def _cross_chart_sentence(r: dict) -> str:
+    return (f"{r['title']} covers {_readable_pct(r['pct'])} of the {r['reference_title']} total "
+            f"({_readable(r['total'], r['unit'])} of {_readable(r['reference_total'], r['unit'])}).")
 
 
 # ─────────────────────────────────────────────
 # Rule-based summary (no model)
 # ─────────────────────────────────────────────
+# Written for someone glancing at a dashboard: whole numbers for large figures,
+# "more than half" where it fits, and the smallest categories folded into one line.
+def _readable(value: float, unit: str) -> str:
+    """15,521.67 km → 15,522 km; small values keep their decimals (3.22 km)."""
+    return _amount(round(value) if abs(value) >= 100 else value, unit)
+
+
+def _readable_pct(pct: float) -> str:
+    """19.0 → 19%, 56.5 → 56.5%, and a share that rounds to zero → under 0.1%."""
+    return "under 0.1%" if 0 < abs(pct) < 0.1 else f"{_fmt(round(pct, 1))}%"
+
+
+def _with_pct(entry: dict, unit: str) -> str:
+    """"15,522 km (56.5%)", or just the amount when the chart has no shares."""
+    text = _readable(entry["value"], unit)
+    if "share_pct" in entry:
+        text += f" ({_readable_pct(entry['share_pct'])})"
+    return text
+
+
+def _join(labels: list[str]) -> str:
+    return labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
+
+
+def _plain_name(name: str, unit: str) -> str:
+    """"Length (km)" → "Length" when the unit is shown next to every figure anyway."""
+    return re.sub(rf"\s*\({re.escape(unit)}\)\s*$", "", name, flags=re.IGNORECASE) if unit else name
+
+
+def _rule_categories(s: dict, unit: str) -> tuple[str, list[str]]:
+    largest, items = s["largest"], s["items"]
+    share = largest.get("share_pct")
+    if share is not None and share > 50:
+        lead = f"{largest['label']} makes up more than half of the total"
+    elif share is not None and share >= 45:
+        lead = f"{largest['label']} makes up almost half of the total"
+    else:
+        lead = f"{largest['label']} is the largest"
+    if share is not None:
+        headline = (f"{lead}: {_readable(largest['value'], unit)} out of "
+                    f"{_readable(s['total'], unit)} ({_readable_pct(share)}).")
+    else:
+        headline = f"{lead} at {_readable(largest['value'], unit)}."
+
+    points = [f"{_join(g['members'])} together: {_with_pct(g, unit)}." for g in s.get("groups", [])]
+    if len(items) >= 3:
+        points.append(f"{items[1]['label']} is next with {_with_pct(items[1], unit)}, "
+                      f"followed by {items[2]['label']} with {_with_pct(items[2], unit)}.")
+    elif len(items) == 2:
+        points.append(f"{items[1]['label']} has {_with_pct(items[1], unit)}.")
+
+    # Everything after the top three, in one sentence rather than one line each.
+    rest = items[3:]
+    rest_count = len(rest) + s.get("others", {}).get("count", 0)
+    if rest_count:
+        rest_value = sum(i["value"] for i in rest) + s.get("others", {}).get("value", 0)
+        names = [i["label"] for i in rest[:4]] + (["others"] if rest_count > 4 else [])
+        amount = _readable(rest_value, unit)
+        if share is not None and s["total"] > 0:
+            rest_pct = rest_value / s["total"] * 100
+            amount += f" ({_readable_pct(rest_pct)})"
+            only = "only " if rest_pct < 10 else ""
+        else:
+            only = ""
+        if rest_count == 1:
+            points.append(f"{rest[0]['label']} has {only}{amount}.")
+        else:
+            points.append(f"The other {rest_count} categories ({_join(names)}) add up to {only}{amount}.")
+    return headline, points
+
+
+def _rule_trend(s: dict, unit: str) -> tuple[str, list[str]]:
+    name = _plain_name(s["name"], unit)
+    first, last = s["first"], s["last"]
+    if s["change"] == 0:
+        headline = f"{name} stayed at {_readable(first['value'], unit)} from {first['label']} to {last['label']}."
+    else:
+        rose = s["change"] > 0
+        headline = (f"{name} went {'up' if rose else 'down'} from {_readable(first['value'], unit)} in {first['label']} "
+                    f"to {_readable(last['value'], unit)} in {last['label']}")
+        if "change_pct" in s:
+            headline += f", a {'rise' if rose else 'drop'} of {_readable_pct(abs(s['change_pct']))}"
+        headline += "."
+    points = [f"It was highest in {s['highest']['label']} ({_readable(s['highest']['value'], unit)}) "
+              f"and lowest in {s['lowest']['label']} ({_readable(s['lowest']['value'], unit)})."]
+    return headline, points
+
+
 def rule_based_chart_summary(facts: dict) -> dict:
     unit = facts.get("unit") or ""
-    s = facts["series"][0]
-    points = []
-    if facts["kind"] == "trend":
-        change = _amount(s["change"], unit, signed=True)
-        if "change_pct" in s:
-            change += f", {s['change_pct']:+.1f}%"
-        headline = (
-            f"{s['name']} went from {_amount(s['first']['value'], unit)} in {s['first']['label']} "
-            f"to {_amount(s['last']['value'], unit)} in {s['last']['label']} ({change})."
-        )
-        points.append(
-            f"Highest was {s['highest']['label']} at {_amount(s['highest']['value'], unit)}; "
-            f"lowest was {s['lowest']['label']} at {_amount(s['lowest']['value'], unit)}."
-        )
-    else:
-        largest = s["largest"]
-        headline = (
-            f"{largest['label']} is the largest part of {s['name']} at {_amount(largest['value'], unit)}"
-            f"{_share(largest)}, out of {_amount(s['total'], unit)} in total."
-        )
-        points += [f"{g['label']} ({', '.join(g['members'])}): {_amount(g['value'], unit)}{_share(g)}."
-                   for g in s.get("groups", [])]
-        points += [f"{i['label']}: {_amount(i['value'], unit)}{_share(i)}." for i in s["items"][1:3]]
-        if s["count"] > 3:
-            smallest = s["smallest"]
-            points.append(f"Smallest is {smallest['label']} at {_amount(smallest['value'], unit)}{_share(smallest)}.")
+    is_trend = facts["kind"] == "trend"
+    headline, points = (_rule_trend if is_trend else _rule_categories)(facts["series"][0], unit)
+
     for other in facts["series"][1:]:
-        if facts["kind"] == "trend":
-            points.append(f"{other['name']} went from {_amount(other['first']['value'], unit)} "
-                          f"to {_amount(other['last']['value'], unit)}.")
+        name = _plain_name(other["name"], unit)
+        if is_trend:
+            points.append(f"{name} went from {_readable(other['first']['value'], unit)} "
+                          f"to {_readable(other['last']['value'], unit)}.")
         else:
-            points.append(f"{other['name']} totals {_amount(other['total'], unit)}.")
+            points.append(f"{name} adds up to {_readable(other['total'], unit)}.")
+
     c = facts.get("comparison")
-    if c:
-        points.append(f"{c['series'][1]} minus {c['series'][0]}: {_amount(c['difference'], unit, signed=True)} overall.")
+    if c and c["difference"]:
+        first, second = (_plain_name(n, unit) for n in c["series"])
+        gap = _readable(abs(c["difference"]), unit)
+        if "difference_pct" in c:
+            gap += f" ({_readable_pct(abs(c['difference_pct']))})"
+        points.append(f"Overall, {second} is {gap} {'above' if c['difference'] > 0 else 'below'} {first}.")
     return {"headline": headline, "points": points[:5], "watch": []}
 
 
@@ -448,6 +534,8 @@ Rules:
 - Use only the facts in the user message. Do not use outside knowledge.
 - Copy every number from the facts. You may round it, but never add, subtract, divide or estimate a new number. If a comparison has no number in the facts, describe it in words.
 - Start with the most important finding. Name categories exactly as the facts name them.
+- Write for a busy manager: short sentences in plain, everyday words. Round long figures to whole numbers and percentages to at most one decimal, and say "more than half" or "about a quarter" where it reads better.
+- Refer to the measure in plain words, never as a field name or with a unit in brackets.
 - Do not mention the facts, JSON, these rules or how the data was prepared.
 - Write in {language}, keeping numbers as digits 0-9.
 - Use an empty list for "watch" when nothing needs attention.
@@ -461,6 +549,8 @@ Rules:
 - Use only the facts in the user message. Do not use outside knowledge.
 - Copy every number from the facts. You may round it, but never add, subtract, divide or estimate a new number. If a comparison has no number in the facts, describe it in words.
 - The headline covers the dashboard as a whole. Each point may draw on one chart or relate several; relate charts only through numbers listed under "Across charts".
+- Write for a busy manager: short sentences in plain, everyday words. Round long figures to whole numbers and percentages to at most one decimal, and say "more than half" or "about a quarter" where it reads better.
+- Refer to the measure in plain words, never as a field name or with a unit in brackets.
 - Do not mention the facts, JSON, these rules, chart numbers like [1], or how the data was prepared.
 - Write in {language}, keeping numbers as digits 0-9.
 - Use an empty list for "watch" when nothing needs attention.
@@ -572,7 +662,8 @@ async def summarize_dashboard(dashboard: dict, provider, language: str = "Englis
     if dashboard.get("filters"):
         header.append("Filters: " + ", ".join(f"{k} = {v}" for k, v in dashboard["filters"].items()))
     blocks = [f"[{i}] {render_chart_facts(f)}" for i, f in enumerate(facts_list, 1)]
-    cross = _cross_chart_lines(facts_list)
+    ratios = _cross_chart_ratios(facts_list)
+    cross = [_cross_chart_line(r) for r in ratios]
     text = "\n".join(header) + "\n\n" + "\n\n".join(blocks)
     if cross:
         text += "\n\nAcross charts:\n" + "\n".join(f"  {line}" for line in cross)
@@ -580,7 +671,8 @@ async def summarize_dashboard(dashboard: dict, provider, language: str = "Englis
     per_chart = [rule_based_chart_summary(f) for f in facts_list]
     fallback = {
         "headline": per_chart[0]["headline"],
-        "points": ([p["headline"] for p in per_chart[1:]] + [f"{line}." for line in cross])[:6] or per_chart[0]["points"],
+        "points": ([p["headline"] for p in per_chart[1:]] + [_cross_chart_sentence(r) for r in ratios])[:6]
+        or per_chart[0]["points"],
         "watch": [],
     }
     result = await _write_from_facts(DASHBOARD_SYSTEM, text, provider, language, fallback)
