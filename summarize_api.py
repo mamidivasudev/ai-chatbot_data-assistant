@@ -26,6 +26,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+import document_tables
 import summarizer
 from llm_provider import LLMError, get_provider
 
@@ -119,29 +120,50 @@ def _remember(key: str, result: dict) -> None:
         _cache.popitem(last=False)
 
 
-def _extract_text(path: str, filename: str) -> str:
+def _read_document(path: str, filename: str) -> tuple[str, list[dict]]:
+    """(text, status counts). Status counts come from status-like table columns; see document_tables."""
     name = filename.lower()
     if name.endswith((".txt", ".md")):
         with open(path, "r", encoding="utf-8", errors="ignore") as fh:
-            return fh.read()
-    # Same parsers SatBot uses when it indexes a file, so a summary and the
-    # Q&A over that file read identical text.
+            return fh.read(), []
+    if name.endswith(".docx"):
+        # Read in body order with header-labelled cells, not with SatBot's ingestion
+        # parser, which moves tables to the end and drops the column names.
+        try:
+            text, tables = document_tables.read_docx(path)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Failed to read Word document: {exc}")
+        return text, _safe_status_counts(tables, filename)
     try:
         import v2_rag_engine
     except ImportError as exc:
         raise HTTPException(status_code=503, detail=f"Document parsing is unavailable on this host: {exc}")
     try:
         if name.endswith(".pdf"):
-            return v2_rag_engine.extract_text_from_pdf(path)
-        if name.endswith(".docx"):
-            return v2_rag_engine.extract_text_from_docx(path)
-        return v2_rag_engine.extract_text_from_excel(path, name)
+            return v2_rag_engine.extract_text_from_pdf(path), []
+        # Spreadsheet rows already read "Column: value | …" in SatBot's parser.
+        text = v2_rag_engine.extract_text_from_excel(path, name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    try:
+        tables = document_tables.read_sheet_tables(path, name)
+    except Exception as exc:
+        logger.warning("Could not read tables of %s for status counts: %s", filename, exc)
+        tables = []
+    return text, _safe_status_counts(tables, filename)
 
 
-async def _load_document(file: Optional[UploadFile]) -> tuple[str, str]:
-    """(filename, text) of the uploaded file, or of SatBot's current file when none is sent."""
+def _safe_status_counts(tables: list, filename: str) -> list[dict]:
+    # The counts are a bonus: a quirk in one table must not cost the whole summary.
+    try:
+        return document_tables.status_counts(tables)
+    except Exception as exc:
+        logger.warning("Could not count statuses in %s: %s", filename, exc)
+        return []
+
+
+async def _load_document(file: Optional[UploadFile]) -> tuple[str, str, list[dict]]:
+    """(filename, text, status counts) of the uploaded file, or of SatBot's current file when none is sent."""
     if file is not None and file.filename:
         filename = os.path.basename(file.filename)
         extension = os.path.splitext(filename)[1].lower()
@@ -155,7 +177,7 @@ async def _load_document(file: Optional[UploadFile]) -> tuple[str, str]:
             path = os.path.join(tmp, "document" + extension)
             with open(path, "wb") as fh:
                 fh.write(data)
-            text = await run_in_threadpool(_extract_text, path, filename)
+            text, status = await run_in_threadpool(_read_document, path, filename)
     else:
         current = []
         if os.path.isdir(RAG_UPLOAD_DIR):
@@ -163,7 +185,7 @@ async def _load_document(file: Optional[UploadFile]) -> tuple[str, str]:
         if not current:
             raise HTTPException(status_code=400, detail="Send a file, or upload one to SatBot first.")
         filename = current[0]
-        text = await run_in_threadpool(_extract_text, os.path.join(RAG_UPLOAD_DIR, filename), filename)
+        text, status = await run_in_threadpool(_read_document, os.path.join(RAG_UPLOAD_DIR, filename), filename)
 
     # PDF text comes back with "## SECTION: Page N" markers even when a page
     # has almost no text, so measure what's left without them.
@@ -175,7 +197,7 @@ async def _load_document(file: Optional[UploadFile]) -> tuple[str, str]:
         )
     if not content:
         raise HTTPException(status_code=422, detail="The document has no readable text.")
-    return filename, text
+    return filename, text, status
 
 
 def _sse(event: str, data: dict) -> str:
@@ -252,7 +274,7 @@ async def summarize_document(
 ):
     language = _check_language(language)
     provider = _provider(model)
-    filename, text = await _load_document(file)
+    filename, text, status = await _load_document(file)
 
     key = _cache_key("document", hashlib.sha256(text.encode("utf-8")).hexdigest(), language, provider)
     cached = _cached(key, refresh)
@@ -261,7 +283,7 @@ async def summarize_document(
     started = time.time()
     result = None
     try:
-        async for event, data in summarizer.summarize_document_events(text, provider, language=language):
+        async for event, data in summarizer.summarize_document_events(text, provider, language=language, status=status):
             if event == "result":
                 result = data
     except LLMError as exc:
@@ -284,7 +306,7 @@ async def summarize_document_stream(
     language = _check_language(language)
     provider = _provider(model)
     # Read the upload before streaming starts; the request's file is closed afterwards.
-    filename, text = await _load_document(file)
+    filename, text, status = await _load_document(file)
     key = _cache_key("document", hashlib.sha256(text.encode("utf-8")).hexdigest(), language, provider)
 
     async def events():
@@ -296,7 +318,7 @@ async def summarize_document_stream(
             return
         started = time.time()
         try:
-            async for event, data in summarizer.summarize_document_events(text, provider, language=language):
+            async for event, data in summarizer.summarize_document_events(text, provider, language=language, status=status):
                 if event == "result":
                     data.update(filename=filename, provider=provider.name, model=provider.model, cached=False,
                                 time_taken=round(time.time() - started, 2))

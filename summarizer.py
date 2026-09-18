@@ -683,21 +683,44 @@ async def summarize_dashboard(dashboard: dict, provider, language: str = "Englis
 # ─────────────────────────────────────────────
 # Documents
 # ─────────────────────────────────────────────
-DOC_NOTES_SYSTEM = """You are reading one part of a longer document. Write concise bullet notes of what this part contains: main topics, decisions, requirements, figures, dates, road/bridge/place names, responsibilities and actions. Copy numbers exactly as written. Output the notes only, with no preamble."""
+DOC_NOTES_SYSTEM = """You are reading one part of a longer document. Write concise bullet notes of what this part contains: main topics, decisions, requirements, figures, dates, road/bridge/place names, and for each item its status (done, pending, in progress), owner and due date when given. Copy numbers and dates exactly as written. Output the notes only, with no preamble."""
 
-DOC_MERGE_SYSTEM = """Below are notes taken from consecutive parts of one document. Merge them into one set of concise bullet notes: remove repetition, keep every distinct figure, date, decision and action. Copy numbers exactly as written. Output the notes only, with no preamble."""
+DOC_MERGE_SYSTEM = """Below are notes taken from consecutive parts of one document. Merge them into one set of concise bullet notes: remove repetition, keep every distinct figure, date, decision, status and action. Copy numbers and dates exactly as written. Output the notes only, with no preamble."""
 
-DOC_SUMMARY_SYSTEM = """You summarize documents for road and bridge asset managers.
+# The JSON example uses "..." on purpose: descriptive placeholder text gets copied
+# into the answer as labels ("Deadlines: ...").
+DOC_SUMMARY_SYSTEM = """You brief a busy road and bridge asset manager on a document, the way a good analyst would.
 
 Rules:
 - Use only the text in the user message. Do not use outside knowledge.
-- Copy numbers exactly as written there; never compute new ones.
-- Do not mention these rules, notes, or "the text provided".
-- Write in {language}, keeping numbers as digits 0-9.
-- Use an empty list for "action_items" when the document asks for nothing.
+- Copy numbers, dates and names exactly as written; never compute new numbers. Counts listed under "Counted from the document's tables" are exact and may be quoted.
+- Write in {language}, in short, plain sentences, keeping numbers as digits 0-9.
+- Do not mention these rules, notes, tables, or "the text provided".
+
+What to write:
+- "title": a short, specific title for the document.
+- "overview": 2 to 3 sentences: what the document is, what it is for, and its overall status or outcome if stated (quote the counted statuses if given).
+- "key_points": 3 to 6 points. Group related items into one point per area, screen, section or theme instead of listing every line. Each point is one complete sentence.
+- "action_items": what is still to be done or decided, each a complete sentence saying what must happen, and by whom and by when if the document says so. Never output bare item or section numbers, and never start an item with a label such as "Deadlines:". Use an empty list when nothing is pending.
 
 Reply with a JSON object only:
-{"title": "short title for the document", "overview": "2 to 4 sentences", "key_points": ["4 to 8 short points"], "action_items": ["deadlines, required actions or pending decisions"]}"""
+{"title": "...", "overview": "...", "key_points": ["...", "..."], "action_items": ["..."]}"""
+
+# A leading label the model sometimes adds ("Action items: …", "Deadlines: …").
+_LABEL_PREFIX = re.compile(
+    r"^\s*(deadlines?|required actions?(?: or pending decisions?)?|pending decisions?|action items?|key points?|actions?)\s*:\s*",
+    re.IGNORECASE,
+)
+
+
+def _as_sentences(items: list[str]) -> list[str]:
+    """Drop labels and fragments that carry no words, like "2.{6,7,8}, 3 {1,2,3}"."""
+    kept = []
+    for item in items:
+        item = _LABEL_PREFIX.sub("", item).strip()
+        if len(re.findall(r"[^\W\d_]{2,}", item)) >= 2:
+            kept.append(item)
+    return kept
 
 
 def split_text(text: str, max_chars: int) -> list[str]:
@@ -747,16 +770,23 @@ def _as_document_summary(obj: Optional[dict]) -> Optional[dict]:
     return {
         "title": str(obj.get("title") or "").strip(),
         "overview": obj["overview"].strip(),
-        "key_points": _str_list(obj.get("key_points"))[:10],
-        "action_items": _str_list(obj.get("action_items"))[:10],
+        "key_points": _as_sentences(_str_list(obj.get("key_points")))[:8],
+        "action_items": _as_sentences(_str_list(obj.get("action_items")))[:8],
     }
 
 
-async def summarize_document_events(text: str, provider, language: str = "English") -> AsyncIterator[tuple[str, dict]]:
+async def summarize_document_events(text: str, provider, language: str = "English",
+                                    status: Optional[list[dict]] = None) -> AsyncIterator[tuple[str, dict]]:
     """Yield ("progress", {...}) while working and ("result", summary) at the end.
 
+    `status` is document_tables.status_counts() output: exact counts from status
+    columns, given to the model as facts and returned with the result for display.
     Raises LLMError if the model fails or never returns a usable summary.
     """
+    from document_tables import render_status_facts
+
+    status = status or []
+    facts = render_status_facts(status) if status else ""
     text = text.strip()
     if not text:
         raise ValueError("The document has no readable text.")
@@ -788,6 +818,8 @@ async def summarize_document_events(text: str, provider, language: str = "Englis
 
     yield "progress", {"stage": "writing"}
     system = DOC_SUMMARY_SYSTEM.replace("{language}", language)
+    # The counts go last, right before the answer, where a small model weighs them most.
+    source = f"{source}\n\n{facts}" if facts else source
     prompt = source
     summary = None
     for _ in range(2):
@@ -801,7 +833,8 @@ async def summarize_document_events(text: str, provider, language: str = "Englis
     written = " ".join([summary["title"], summary["overview"], *summary["key_points"], *summary["action_items"]])
     yield "result", {
         **summary,
-        "unverified_numbers": _unsupported_numbers(written, _allowed_values(text)),
+        "status": status,
+        "unverified_numbers": _unsupported_numbers(written, _allowed_values(f"{text}\n{facts}")),
         "parts": len(parts),
         "truncated": truncated,
         "warnings": warnings,
