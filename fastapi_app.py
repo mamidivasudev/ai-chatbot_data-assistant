@@ -184,6 +184,11 @@ def verify_token():
     return {
         "sub": "test-user"
     }
+
+
+# /summarize/* — chart, dashboard and document summaries (summarize_api.py)
+from summarize_api import router as summarize_router
+app.include_router(summarize_router, dependencies=[Depends(verify_token)])
 # ─────────────────────────────────────────────
 # Request / Response models
 # ─────────────────────────────────────────────

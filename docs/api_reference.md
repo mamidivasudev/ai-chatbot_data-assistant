@@ -221,6 +221,147 @@ Content-Type: application/json
 
 ---
 
+## 6. Summaries
+
+AI summaries of dashboard charts, whole dashboards and documents (`summarize_api.py`, `summarizer.py`).
+
+For charts the service computes every figure itself: totals, shares, "Good or better" / "Poor or worse" groups, trends, and target-vs-achieved gaps. The model only writes the sentences. Any number the model writes that isn't in those figures is rejected. If the model is down, the summary is built from the data by rule, and `source` says which happened:
+
+| `source` | Meaning |
+|---|---|
+| `llm` | Written by the model; every number verified |
+| `llm+rules` | Model sentences with unverifiable numbers were removed and refilled from the data |
+| `rules` | Model unreachable or unusable; built directly from the data |
+
+Documents are read in full, not just the top matching chunks that `/ask-your-query` uses. Long files are summarized in parts, then combined.
+
+**Configuration** (environment variables)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `LLM_PROVIDER` | `ollama` | `ollama` or `gemini` |
+| `OLLAMA_SUMMARY_MODEL` | `llama3:latest` | Any installed Ollama model |
+| `OLLAMA_NUM_CTX` | `8192` | Context window per call. Raise it (e.g. `16384`) for models that support more, so long documents need fewer calls |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | — / `gemini-2.5-flash` | Only when `LLM_PROVIDER=gemini` |
+| `SUMMARY_MAX_UPLOAD_MB` | `25` | Upload size limit |
+
+`fastapi_app.py` pins `OLLAMA_HOST` to `http://127.0.0.1:11434`, so Ollama must run on the same machine as the API.
+
+### 6.1 Status
+
+```http
+GET /summarize/status
+```
+```json
+{ "provider": "ollama", "model": "llama3:latest", "max_input_chars": 19660,
+  "reachable": true, "model_available": true, "installed_models": ["llama3:latest", "qwen2.5-coder:7b"] }
+```
+
+### 6.2 Summarize a chart
+
+Send the chart's data rows exactly as amCharts holds them. `category_field` and `value_fields` are inferred when omitted; styling fields such as `color` are ignored.
+
+```http
+POST /summarize/chart
+Content-Type: application/json
+```
+```json
+{
+  "title": "Roughness by category",
+  "chart_type": "bar",
+  "unit": "km",
+  "filters": { "year": 2025, "module": "RIS" },
+  "category_field": "category",
+  "value_fields": ["length"],
+  "series_names": { "length": "Length" },
+  "data": [
+    { "category": "Good", "length": 11249 },
+    { "category": "Fair", "length": 6338.71 },
+    { "category": "Very Good", "length": 1573.22 },
+    { "category": "Poor", "length": 2132.71 },
+    { "category": "Very Poor", "length": 1031.08 }
+  ],
+  "language": "English"
+}
+```
+
+Optional: `groups` (e.g. `{"Needs work": ["Poor", "Very Poor"]}`; condition scales get "Good or better" / "Poor or worse" automatically), `model`, `refresh: true` to skip the cache.
+
+**Response `200 OK`** *(illustrative wording)*
+```json
+{
+  "headline": "Just over half the surveyed network, 11,249 km (50.4%), is in Good condition.",
+  "points": ["12,822.22 km (57.4%) is Good or better.", "Poor or worse covers 3,163.79 km (14.2%)."],
+  "watch": ["Fair roads account for 6,338.71 km (28.4%)."],
+  "source": "llm",
+  "warnings": [],
+  "facts": { "kind": "categories", "series": [ { "total": 22324.72, "...": "..." } ] },
+  "provider": "ollama", "model": "llama3:latest", "cached": false, "time_taken": 2.4
+}
+```
+
+`422` if the data has no label field or no numeric field.
+
+### 6.3 Summarize a dashboard
+
+One summary across several charts. Charts that share a unit are also compared by total, e.g. roughness covers 81.3% of the road-type total, which points to roads without a survey.
+
+```http
+POST /summarize/dashboard
+```
+```json
+{ "title": "RIS dashboard", "filters": { "year": 2025 },
+  "charts": [ { "title": "Roadtype by category", "unit": "km", "data": [ ... ] },
+              { "title": "Roughness by category", "unit": "km", "data": [ ... ] } ] }
+```
+Response: as for a chart, with `facts` as a list and `cross_chart` lines.
+
+### 6.4 Summarize a document
+
+Multipart form. Omit `file` to summarize the file currently loaded in SatBot (`/upload-file`).
+
+```http
+POST /summarize/document
+Content-Type: multipart/form-data
+
+file=<.pdf | .docx | .txt | .md | .csv | .xlsx | .xls>   language=English
+```
+```json
+{
+  "title": "...", "overview": "...", "key_points": ["..."], "action_items": ["..."],
+  "unverified_numbers": [], "parts": 3, "truncated": false, "warnings": [],
+  "filename": "report.pdf", "provider": "ollama", "model": "llama3:latest", "cached": false, "time_taken": 41.7
+}
+```
+`unverified_numbers` lists figures in the summary that don't appear in the document. `415` unsupported type, `413` too large, `422` scanned PDF (no text layer; OCR not enabled yet), `503` model failure.
+
+`POST /summarize/document-stream` takes the same form and returns server-sent events:
+
+```
+event: start     data: {"filename": "report.pdf", "characters": 48211}
+event: progress  data: {"stage": "reading", "part": 1, "parts": 3}
+event: progress  data: {"stage": "merging", "groups": 1}
+event: progress  data: {"stage": "writing"}
+event: result    data: { ...same body as /summarize/document... }
+event: done      data: {}
+```
+On failure: `event: error  data: {"detail": "..."}`.
+
+### 6.5 Checking a deployment
+
+```bash
+curl -s http://your-server:8000/summarize/status
+curl -s -X POST http://your-server:8000/summarize/chart -H "Content-Type: application/json" \
+     -d '{"title":"Roughness by category","unit":"km","data":[{"category":"Good","length":11249},{"category":"Fair","length":6338.71},{"category":"Poor","length":2132.71}]}'
+curl -s -X POST http://your-server:8000/summarize/document -F "file=@report.pdf"
+curl -N -X POST http://your-server:8000/summarize/document-stream -F "file=@report.pdf"
+```
+A chart summary with `"source": "rules"` means the model was not reached. Check `/summarize/status`.
+
+Unit tests (no model needed): `pip install pytest` then `python -m pytest tests`.
+
+---
+
 ## Request Fields Reference
 
 | Field | Type | Required | Description |
