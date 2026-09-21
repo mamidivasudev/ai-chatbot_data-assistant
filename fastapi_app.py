@@ -935,13 +935,13 @@ async def v2_ask_your_query(
         system_prompt = MULTILINGUAL_PROMPT_TEMPLATE
         context_text = "\n\n---\n\n".join(relevant_chunks)
         system_prompt += f"SYSTEM_DATABASE_RECORDS:\n{context_text}\n\n"
-        system_prompt += "You must answer the user's question using ONLY the SYSTEM_DATABASE_RECORDS above.\n\n"
-        system_prompt += "CRITICAL OUTPUT CONSTRAINTS (YOU MUST OBEY THESE OR FAIL):\n"
-        system_prompt += f"- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"{FALLBACK_MESSAGE}\"\n"
-        system_prompt += "- If the SYSTEM_DATABASE_RECORDS only partially answers the question, answer with what IS present and do not guess or fabricate the rest.\n"
-        system_prompt += "- NEVER perform mathematical calculations or combinations.\n"
-        system_prompt += "- Never use introductory phrases like \"According to the records\". Start directly with the answer.\n"
-        system_prompt += "- Provide a complete and comprehensive answer using all relevant details from the records (especially if it is a process, list, or set of items). Do not leave out items that are present in the records."
+        # system_prompt += "You must answer the user's question using ONLY the SYSTEM_DATABASE_RECORDS above.\n\n"
+        # system_prompt += "CRITICAL OUTPUT CONSTRAINTS (YOU MUST OBEY THESE OR FAIL):\n"
+        # system_prompt += f"- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"{FALLBACK_MESSAGE}\"\n"
+        # system_prompt += "- If the SYSTEM_DATABASE_RECORDS only partially answers the question, answer with what IS present and do not guess or fabricate the rest.\n"
+        # system_prompt += "- NEVER perform mathematical calculations or combinations.\n"
+        # system_prompt += "- Never use introductory phrases like \"According to the records\". Start directly with the answer.\n"
+        # system_prompt += "- Provide a complete and comprehensive answer using all relevant details from the records (especially if it is a process, list, or set of items). Do not leave out items that are present in the records."
 
         if detected_lang:
             system_prompt += f"\n\nCRITICAL MANDATORY OVERRIDE: The USER QUESTION is in {detected_lang}. You MUST write your entire response natively in {detected_lang}. Do NOT reply in English. If you reply in English, you will fail."
@@ -1060,13 +1060,13 @@ async def v2_ask_your_query_stream(
         system_prompt = MULTILINGUAL_PROMPT_TEMPLATE
         context_text = "\n\n---\n\n".join(relevant_chunks)
         system_prompt += f"SYSTEM_DATABASE_RECORDS:\n{context_text}\n\n"
-        system_prompt += "You must answer the user's question using ONLY the SYSTEM_DATABASE_RECORDS above.\n\n"
-        system_prompt += "CRITICAL OUTPUT CONSTRAINTS (YOU MUST OBEY THESE OR FAIL):\n"
-        system_prompt += f"- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"{FALLBACK_MESSAGE}\"\n"
-        system_prompt += "- If the SYSTEM_DATABASE_RECORDS only partially answers the question, answer with what IS present and do not guess or fabricate the rest.\n"
-        system_prompt += "- NEVER perform mathematical calculations or combinations.\n"
-        system_prompt += "- Never use introductory phrases like \"According to the records\". Start directly with the answer.\n"
-        system_prompt += "- Provide a complete and comprehensive answer using all relevant details from the records (especially if it is a process, list, or set of items). Do not leave out items that are present in the records."
+        # system_prompt += "You must answer the user's question using ONLY the SYSTEM_DATABASE_RECORDS above.\n\n"
+        # system_prompt += "CRITICAL OUTPUT CONSTRAINTS (YOU MUST OBEY THESE OR FAIL):\n"
+        # system_prompt += f"- If the exact answer or the raw data needed to answer is not in the SYSTEM_DATABASE_RECORDS, you must output exactly this string and nothing else: \"{FALLBACK_MESSAGE}\"\n"
+        # system_prompt += "- If the SYSTEM_DATABASE_RECORDS only partially answers the question, answer with what IS present and do not guess or fabricate the rest.\n"
+        # system_prompt += "- NEVER perform mathematical calculations or combinations.\n"
+        # system_prompt += "- Never use introductory phrases like \"According to the records\". Start directly with the answer.\n"
+        # system_prompt += "- Provide a complete and comprehensive answer using all relevant details from the records (especially if it is a process, list, or set of items). Do not leave out items that are present in the records."
         
         if detected_lang:
             system_prompt += f"\n\nCRITICAL MANDATORY OVERRIDE: The USER QUESTION is in {detected_lang}. You MUST write your entire response natively in {detected_lang}. Do NOT reply in English. If you reply in English, you will fail."
