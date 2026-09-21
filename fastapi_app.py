@@ -126,13 +126,13 @@ MULTILINGUAL_PROMPT_TEMPLATE = (
     "CRITICAL RULES:\n"
     "1. DIRECT & NATURAL ANSWERS ONLY: Begin your answer directly with facts and data. NEVER start answers with 'According to...', 'Based on...', 'According to the SYSTEM_DATABASE_RECORDS...', 'According to the provided information...', 'According to the data...', 'The conversation context...', 'After reviewing...', 'After analyzing...' or any intro/preamble phrases. State the fact immediately as the very first word of your answer.\n"
     "2. STRICT NUMERICAL & DATA FACT ACCURACY: NEVER guess, estimate, or hallucinate numbers or statistics. Read exact numerical figures strictly from the records. NEVER perform mathematical calculations, additions, or combinations of totals unless explicitly provided.\n"
-    "3. NO EXTERNAL OR GENERAL KNOWLEDGE: ONLY answer using records present in the system context. NEVER use your own training knowledge, general world knowledge, or external information. Even if asked about famous people, capital cities, or basic facts (e.g. Prime Minister of India, capital of France), you MUST return the fallback message.\n"
+    # "3. NO EXTERNAL OR GENERAL KNOWLEDGE: ONLY answer using records present in the system context. NEVER use your own training knowledge, general world knowledge, or external information. Even if asked about famous people, capital cities, or basic facts (e.g. Prime Minister of India, capital of France), you MUST return the fallback message.\n"
     "4. NO INTERNAL REASONING: NEVER narrate your reasoning process. Do NOT output phrases like 'To answer this, I will look for...' or 'Since none are found...' Just output the final answer.\n"
     "5. HIDE FILE & META REFERENCES: NEVER mention or use words like 'document', 'file', 'PDF', 'page', 'manual', 'section', 'chapter', 'appendix', 'text', 'provided information', 'SYSTEM_DATABASE_RECORDS'. Present all information natively.\n"
     "6. FORMATTING & LISTS: Use clear line breaks and Markdown formatting for multi-step processes or lists.\n"
-    "7. MISSING INFORMATION FALLBACK: If requested details are missing, cannot be answered, or fall outside the provided context, you MUST output EXACTLY ONE SENTENCE: 'This detail is currently not available in our system.' Do NOT add any preamble, do NOT add 'I am sorry', and do NOT explain your reasoning.\n"
+    # "7. MISSING INFORMATION FALLBACK: If requested details are missing, cannot be answered, or fall outside the provided context, you MUST output EXACTLY ONE SENTENCE: 'This detail is currently not available in our system.' Do NOT add any preamble, do NOT add 'I am sorry', and do NOT explain your reasoning.\n"
     "8. STRICT TRANSLATION: You MUST translate your final answer (including the fallback message) into the EXACT SAME LANGUAGE as the user's question.\n"
-    "9. OUT-OF-SCOPE QUERIES: If the question is unrelated to road/bridge/PWD data (e.g. simple arithmetic, jokes, unrelated topics), output exactly: 'This detail is currently not available in our system.'\n"
+    # "9. OUT-OF-SCOPE QUERIES: If the question is unrelated to road/bridge/PWD data (e.g. simple arithmetic, jokes, unrelated topics), output exactly: 'This detail is currently not available in our system.'\n"
 )
 
 app = FastAPI(
@@ -910,26 +910,26 @@ async def v2_ask_your_query(
             # instead of leaving the LLM to freely improvise with an empty
             # context (this is what produced the odd "I am the official AI
             # Assistant..." style non-answers previously).
-            if not relevant_chunks:
-                return AskFilesResponse(
-                    session_id=session_id or str(uuid.uuid4()),
-                    question=question,
-                    answer=FALLBACK_MESSAGE,
-                    time_taken=0.0
-                )
+            # if not relevant_chunks:
+            #     return AskFilesResponse(
+            #         session_id=session_id or str(uuid.uuid4()),
+            #         question=question,
+            #         answer=FALLBACK_MESSAGE,
+            #         time_taken=0.0
+            #     )
 
             # FIX: hard relevance gate. Even when chunks ARE retrieved, if
             # the single best match is still a weak/tangential hit, don't
             # let the model attempt an answer at all — this is what caused
             # confident-sounding wrong one-word answers (e.g. "CSV.",
             # "Audit.") and fabricated reasoning in testing.
-            if top_score is not None and top_score < v2_rag_engine.STRONG_RELEVANCE_THRESHOLD:
-                return AskFilesResponse(
-                    session_id=session_id or str(uuid.uuid4()),
-                    question=question,
-                    answer=FALLBACK_MESSAGE,
-                    time_taken=0.0
-                )
+            # if top_score is not None and top_score < v2_rag_engine.STRONG_RELEVANCE_THRESHOLD:
+            #     return AskFilesResponse(
+            #         session_id=session_id or str(uuid.uuid4()),
+            #         question=question,
+            #         answer=FALLBACK_MESSAGE,
+            #         time_taken=0.0
+            #     )
 
         # 3. Construct Grounded Prompt
         system_prompt = MULTILINGUAL_PROMPT_TEMPLATE
@@ -1048,13 +1048,13 @@ async def v2_ask_your_query_stream(
             # Same deterministic-fallback + relevance-gate logic as the
             # non-streaming endpoint, adapted to emit an SSE stream instead
             # of a plain JSON response.
-            if not relevant_chunks or (top_score is not None and top_score < v2_rag_engine.STRONG_RELEVANCE_THRESHOLD):
-                async def weak_match_fallback_generator():
-                    session = session_id or str(uuid.uuid4())
-                    yield f"event: session\ndata: {json.dumps({'session_id': session})}\n\n"
-                    yield f"event: delta\ndata: {json.dumps({'text': FALLBACK_MESSAGE})}\n\n"
-                    yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
-                return StreamingResponse(weak_match_fallback_generator(), media_type="text/event-stream")
+            # if not relevant_chunks or (top_score is not None and top_score < v2_rag_engine.STRONG_RELEVANCE_THRESHOLD):
+            #     async def weak_match_fallback_generator():
+            #         session = session_id or str(uuid.uuid4())
+            #         yield f"event: session\ndata: {json.dumps({'session_id': session})}\n\n"
+            #         yield f"event: delta\ndata: {json.dumps({'text': FALLBACK_MESSAGE})}\n\n"
+            #         yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
+            #     return StreamingResponse(weak_match_fallback_generator(), media_type="text/event-stream")
 
         # 4. Build Optimized Prompt
         system_prompt = MULTILINGUAL_PROMPT_TEMPLATE
