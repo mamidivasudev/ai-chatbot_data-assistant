@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 import document_tables
 import summarizer
+import voice_intent as voice_intent_module
 from llm_provider import LLMError, get_provider
 
 logger = logging.getLogger("summarize_api")
@@ -219,6 +220,27 @@ async def summarize_status():
         "max_input_chars": provider.max_input_chars,
         **(await provider.status()),
     }
+
+
+class VoiceIntentRequest(BaseModel):
+    text: str                                         # what the recogniser heard, any language
+    targets: list[str] = []                           # titles of the charts / documents on screen
+    can_summarize_all: bool = True                    # the screen has a whole-dashboard summary
+    language: str = "English"                         # the app's language, as a plain name
+    model: Optional[str] = None
+
+
+@router.post("/voice-intent")
+async def voice_intent(req: VoiceIntentRequest):
+    """Maps a spoken command (any language) to summarize_all / summarize <item> / read / stop / none."""
+    language = _check_language(req.language)
+    provider = _provider(req.model)
+    try:
+        return await voice_intent_module.resolve_intent(req.text, req.targets, provider, language=language,
+                                                        can_summarize_all=req.can_summarize_all)
+    except LLMError as exc:
+        logger.warning("Voice intent: model unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="The AI model could not be reached.")
 
 
 @router.post("/chart")
