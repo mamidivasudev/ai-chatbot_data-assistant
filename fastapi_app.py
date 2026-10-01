@@ -121,6 +121,13 @@ def get_cipher():
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mssql_api")
 
+# Single source of truth for the "can't answer" sentence -- both the base
+# prompt template below and the later CRITICAL OUTPUT CONSTRAINTS block
+# reference this same constant, so there is only ever one string the model
+# is actually instructed to output, and the post-processing checks further
+# down (sanitize_answer, the streaming endpoint) can reliably detect it.
+FALLBACK_MESSAGE = "This detail is currently not available in our system."
+
 MULTILINGUAL_PROMPT_TEMPLATE = (
     "You are the official AI Assistant for this application.\n\n"
     "CRITICAL RULES:\n"
@@ -130,9 +137,9 @@ MULTILINGUAL_PROMPT_TEMPLATE = (
     "4. NO INTERNAL REASONING: NEVER narrate your reasoning process. Do NOT output phrases like 'To answer this, I will look for...' or 'Since none are found...' Just output the final answer.\n"
     "5. HIDE FILE & META REFERENCES: NEVER mention or use words like 'document', 'file', 'PDF', 'page', 'manual', 'section', 'chapter', 'appendix', 'text', 'provided information', 'SYSTEM_DATABASE_RECORDS'. Present all information natively.\n"
     "6. FORMATTING & LISTS: Use clear line breaks and Markdown formatting for multi-step processes or lists.\n"
-    "7. MISSING INFORMATION FALLBACK: If requested details are missing, cannot be answered, or fall outside the provided context, you MUST output EXACTLY ONE SENTENCE: 'This detail is currently not available in our system.' Do NOT add any preamble, do NOT add 'I am sorry', and do NOT explain your reasoning.\n"
+    f"7. MISSING INFORMATION FALLBACK: If requested details are missing, cannot be answered, or fall outside the provided context, you MUST output EXACTLY ONE SENTENCE: '{FALLBACK_MESSAGE}' Do NOT add any preamble, do NOT add 'I am sorry', and do NOT explain your reasoning.\n"
     "8. STRICT TRANSLATION: You MUST translate your final answer (including the fallback message) into the EXACT SAME LANGUAGE as the user's question.\n"
-    "9. OUT-OF-SCOPE QUERIES: If the question is unrelated to road/bridge/PWD data (e.g. simple arithmetic, jokes, unrelated topics), output exactly: 'This detail is currently not available in our system.'\n"
+    f"9. OUT-OF-SCOPE QUERIES: If the question is unrelated to road/bridge/PWD data (e.g. simple arithmetic, jokes, unrelated topics), output exactly: '{FALLBACK_MESSAGE}'\n"
 )
 
 app = FastAPI(
@@ -809,10 +816,11 @@ _LEAK_PHRASE_PATTERNS = re.compile(
     re.IGNORECASE
 )
 
-# Both "can't answer" paths now return the exact same string, so there's
-# only ever one fallback message in the wild (previously sanitize_answer
-# and the system-prompt-driven fallback used two different messages).
-FALLBACK_MESSAGE = "This detail is currently not available in our system."
+# Both "can't answer" paths now genuinely return the exact same string
+# (FALLBACK_MESSAGE is defined once, above, near MULTILINGUAL_PROMPT_TEMPLATE)
+# -- previously this file had two separate hardcoded fallback strings that
+# had drifted apart, so a check against one never matched what the model
+# was actually instructed to output.
 
 def sanitize_answer(answer: str) -> str:
     """
@@ -834,19 +842,103 @@ def sanitize_answer(answer: str) -> str:
 
     if _LEAK_PATTERNS.search(cleaned):
         logger.warning("Sanitized a leaked internal reference in answer: %r", answer)
-        return FALLBACK_MESSAGE
+        return not_documented_message()
 
-    return cleaned if cleaned else FALLBACK_MESSAGE
+    # Empty after cleanup, or the model output its own "can't answer"
+    # sentence verbatim (FALLBACK_MESSAGE, per the system prompt's rule) --
+    # either way, this is the LLM declining after actually reading the
+    # retrieved chunks, which our deterministic gate already judged
+    # confident enough to attempt. Show our branded message, not the raw
+    # system-prompt fallback line.
+    if not cleaned or cleaned.strip() == FALLBACK_MESSAGE.strip():
+        return not_documented_message()
 
-# Trimmed down to only phrasing that unambiguously asks for a *computed*
-# aggregate. "total number of bridges" etc. were removed because a document
-# can state that number directly as a fact (e.g. "5,635 bridges") — that's
-# not a computed aggregate, and the old keyword list force-refused it.
-AGGREGATE_KEYWORDS = ["total length", "combined length", "sum of", "overall length"]
+    return cleaned
 
-def is_aggregate_question(question: str) -> bool:
+import random
+
+# Several phrasings per bucket, chosen at random on each call, so the bot
+# doesn't sound templated when it hits the same case repeatedly.
+NOT_DOCUMENTED_MESSAGES = [
+    "You’re thinking ahead! This is a GujRAMS-related topic that our bot is still learning about. "
+    "We’re continuously expanding its knowledge to make your experience better.",
+    "Interesting question! We’re working on expanding the GujRAMS knowledge base, "
+    "and this topic is part of that journey. Please check back as we continue making the bot smarter.",
+    "Great question! You’ve found a topic we’re still building! Our GujRAMS AI is continuously "
+    "evolving, and we’re expanding its knowledge base to answer more questions like this.",
+]
+DATA_DRIVEN_MESSAGES = [
+    "Looking for data? Explore it in the GujRAMS Sandbox! For data-driven questions and "
+    "numerical insights, the Sandbox gives you a powerful way to explore the data and discover insights.",
+    "Great question! This looks like a data-driven query. For detailed numbers, statistics and data "
+    "exploration, visit the GujRAMS Sandbox — your space to explore the data and uncover insights.",
+]
+UNRELATED_MESSAGES = [
+    "Seems like this question is unrelated to GujRAMS. Please try asking something related to "
+    "GujRAMS, roads, infrastructure, bridges or traffic related information.",
+]
+
+def not_documented_message() -> str:
+    return random.choice(NOT_DOCUMENTED_MESSAGES)
+
+def data_driven_message() -> str:
+    return random.choice(DATA_DRIVEN_MESSAGES)
+
+def unrelated_message() -> str:
+    return random.choice(UNRELATED_MESSAGES)
+
+# Below this, the question doesn't even share vocabulary with the document —
+# treat it as off-topic entirely rather than "not documented yet."
+TOPIC_RELEVANCE_THRESHOLD = -10.0
+
+_DATA_DRIVEN_PATTERNS = re.compile(
+    r"\b(how many|how much|how long|how far|how wide|how deep|"
+    r"what is the (total|number|count|length|lengthiest|short|shortest|width|height|area|percentage|average|ratio|speed|cost|budget|amount|quantity|distance|duration)|"
+    r"total (number|length|count|area|cost) of|number of|count of|"
+    r"percentage of|proportion of|calculate|average of|sum of|"
+    r"maximum|minimum|highest|lowest)\b",
+    re.IGNORECASE
+)
+
+def is_data_driven_question(question: str) -> bool:
     q = question.lower()
-    return any(kw in q for kw in AGGREGATE_KEYWORDS)
+    if _DATA_DRIVEN_PATTERNS.search(q):
+        return True
+    # A digit in the question (e.g. "roads longer than 50 km") is itself
+    # a strong signal the user wants a numeric/data answer.
+    return bool(re.search(r"\d", q))
+
+# Domain vocabulary, independent of what the ingested document happens to
+# cover. The cross-encoder score alone can't distinguish "on-topic but not
+# documented yet" from "genuinely unrelated" -- it only measures similarity
+# to specific chunks in the current document, and a real GujRAMS question
+# phrased differently from anything in the manual scores just as low as an
+# unrelated one. This keyword check gives the gate an actual sense of the
+# domain, separate from document content.
+_GUJRAMS_DOMAIN_PATTERNS = re.compile(
+    r"\b(gujrams|rrams|bms|bridge|bridges|road|roads|pavement|highway|"
+    r"culvert|culverts|drainage|traffic|infrastructure|asset|maintenance|survey|"
+    r"pwd|corridor|carriageway|shoulder|junction|flyover|underpass|"
+    r"nh|sh|national highway|state highway|rutting|pothole|resurfacing|"
+    r"iri|condition rating|inspection|inventory|"
+    # BMS glossary / module-specific vocabulary -- add here whenever a real
+    # on-topic question gets misrouted to "unrelated" because the word it
+    # uses isn't in this list yet (this list grows with real usage, it's
+    # never going to be complete on day one).
+    r"reconstruction|rehabilitation|prioriti[sz]ation|abutment|abutments|"
+    r"superstructure|sub-?structure|chainage|boq|bill of quantities|"
+    r"bci|bridge condition index|pier|piers|deck|committed project|"
+    r"retire|retiring|widen|strengthening|repair|element|ndt|"
+    r"survey data|execute process|processed data|lookup data|"
+    r"structure|structures|"
+    # sibling GujRAMS modules named in the manual
+    r"\bnm\b|\bris\b|\btis\b|\bpms\b|\brmms\b|\beis\b|\brsams\b|"
+    r"\bmes\b|\bbap\b|\bssum\b)\b",
+    re.IGNORECASE
+)
+
+def is_topic_related(question: str) -> bool:
+    return bool(_GUJRAMS_DOMAIN_PATTERNS.search(question.lower()))
 
 @app.post("/ask-your-query")
 async def v2_ask_your_query(
@@ -895,11 +987,11 @@ async def v2_ask_your_query(
             relevant_chunks = [f"I am {ASSISTANT_NAME}. All information I provide is sourced natively from our secure internal system database."]
             detected_lang = ""
         else:
-            if is_aggregate_question(question):
+            if is_data_driven_question(question):
                 return AskFilesResponse(
                     session_id=session_id or str(uuid.uuid4()),
                     question=question,
-                    answer=FALLBACK_MESSAGE,
+                    answer=data_driven_message(),
                     time_taken=0.0
                 )
 
@@ -915,28 +1007,32 @@ async def v2_ask_your_query(
             logger.info("RELEVANCE_SCORE | question=%r | top_score=%s | chunks_returned=%d",
             question, top_score, len(relevant_chunks))
 
-            # FIX: deterministic fallback when nothing at all was retrieved,
-            # instead of leaving the LLM to freely improvise with an empty
-            # context (this is what produced the odd "I am the official AI
-            # Assistant..." style non-answers previously).
-            if not relevant_chunks:
+            # FIX: the retrieval score alone can't tell "on-topic but not
+            # documented yet" apart from "genuinely unrelated" -- it only
+            # measures similarity to chunks already in the document, so a
+            # real GujRAMS question phrased differently from anything in
+            # the manual can score just as low as an unrelated one. So the
+            # domain keyword check (is_topic_related) acts as a safety net
+            # alongside the score: if either signal says this is a GujRAMS
+            # topic, treat it as "not documented" rather than "unrelated."
+            if not relevant_chunks or top_score is None or top_score < v2_rag_engine.STRONG_RELEVANCE_THRESHOLD:
+                # Keyword check only -- the cross-encoder score is not a
+                # reliable topic-relatedness signal on its own (a genuinely
+                # unrelated question can still score above a loose cutoff,
+                # as seen in testing), so it no longer factors into this
+                # decision.
+                topic_related = is_topic_related(question)
+                if topic_related:
+                    return AskFilesResponse(
+                        session_id=session_id or str(uuid.uuid4()),
+                        question=question,
+                        answer=not_documented_message(),
+                        time_taken=0.0
+                    )
                 return AskFilesResponse(
                     session_id=session_id or str(uuid.uuid4()),
                     question=question,
-                    answer=FALLBACK_MESSAGE,
-                    time_taken=0.0
-                )
-
-            # FIX: hard relevance gate. Even when chunks ARE retrieved, if
-            # the single best match is still a weak/tangential hit, don't
-            # let the model attempt an answer at all — this is what caused
-            # confident-sounding wrong one-word answers (e.g. "CSV.",
-            # "Audit.") and fabricated reasoning in testing.
-            if top_score is not None and top_score < v2_rag_engine.STRONG_RELEVANCE_THRESHOLD:
-                return AskFilesResponse(
-                    session_id=session_id or str(uuid.uuid4()),
-                    question=question,
-                    answer=FALLBACK_MESSAGE,
+                    answer=unrelated_message(),
                     time_taken=0.0
                 )
 
@@ -1034,13 +1130,13 @@ async def v2_ask_your_query_stream(
             relevant_chunks = [f"I am {ASSISTANT_NAME}. All information I provide is sourced natively from our secure internal system database."]
             detected_lang = ""  # identity shortcut — no translation needed
         else:
-            if is_aggregate_question(question):
-                async def aggregate_fallback_generator():
+            if is_data_driven_question(question):
+                async def data_driven_fallback_generator():
                     session = session_id or str(uuid.uuid4())
                     yield f"event: session\ndata: {json.dumps({'session_id': session})}\n\n"
-                    yield f"event: delta\ndata: {json.dumps({'text': FALLBACK_MESSAGE})}\n\n"
+                    yield f"event: delta\ndata: {json.dumps({'text': data_driven_message()})}\n\n"
                     yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
-                return StreamingResponse(aggregate_fallback_generator(), media_type="text/event-stream")
+                return StreamingResponse(data_driven_fallback_generator(), media_type="text/event-stream")
 
             # 2. Advanced Retrieval + Reranking
             search_query = question
@@ -1054,16 +1150,30 @@ async def v2_ask_your_query_stream(
             logger.info("RELEVANCE_SCORE | question=%r | top_score=%s | chunks_returned=%d",
             question, top_score, len(relevant_chunks))
 
-            # Same deterministic-fallback + relevance-gate logic as the
-            # non-streaming endpoint, adapted to emit an SSE stream instead
-            # of a plain JSON response.
-            if not relevant_chunks or (top_score is not None and top_score < v2_rag_engine.STRONG_RELEVANCE_THRESHOLD):
-                async def weak_match_fallback_generator():
+            # Same combined score + domain-keyword gate as the non-streaming
+            # endpoint, adapted to emit an SSE stream instead of a plain
+            # JSON response.
+            if not relevant_chunks or top_score is None or top_score < v2_rag_engine.STRONG_RELEVANCE_THRESHOLD:
+                # Keyword check only -- the cross-encoder score is not a
+                # reliable topic-relatedness signal on its own (a genuinely
+                # unrelated question can still score above a loose cutoff,
+                # as seen in testing), so it no longer factors into this
+                # decision.
+                topic_related = is_topic_related(question)
+                if topic_related:
+                    async def weak_match_fallback_generator():
+                        session = session_id or str(uuid.uuid4())
+                        yield f"event: session\ndata: {json.dumps({'session_id': session})}\n\n"
+                        yield f"event: delta\ndata: {json.dumps({'text': not_documented_message()})}\n\n"
+                        yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
+                    return StreamingResponse(weak_match_fallback_generator(), media_type="text/event-stream")
+
+                async def unrelated_fallback_generator():
                     session = session_id or str(uuid.uuid4())
                     yield f"event: session\ndata: {json.dumps({'session_id': session})}\n\n"
-                    yield f"event: delta\ndata: {json.dumps({'text': FALLBACK_MESSAGE})}\n\n"
+                    yield f"event: delta\ndata: {json.dumps({'text': unrelated_message()})}\n\n"
                     yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
-                return StreamingResponse(weak_match_fallback_generator(), media_type="text/event-stream")
+                return StreamingResponse(unrelated_fallback_generator(), media_type="text/event-stream")
 
         # 4. Build Optimized Prompt
         system_prompt = MULTILINGUAL_PROMPT_TEMPLATE
@@ -1097,9 +1207,18 @@ async def v2_ask_your_query_stream(
             
             buffer = ""
             TARGET_KEYWORD = "SYSTEM_DATABASE_RECORDS"
-            target_len = len(TARGET_KEYWORD)
             leaked = False
-            
+
+            # FIX: previously this forwarded text to the client as it arrived
+            # (holding back only the last few characters as a sliding window
+            # to catch a leaked keyword). That made it impossible to swap out
+            # the LLM's own "can't answer" sentence (FALLBACK_MESSAGE) for our
+            # branded message, because most of it would already have been
+            # streamed out by the time we could tell what the full answer was.
+            # So the full response is accumulated here first -- still a single
+            # fast Ollama call, just not forwarded token-by-token -- and the
+            # decision (real answer / redacted leak / branded fallback) is
+            # made once, on the complete text, before anything is sent.
             try:
                 async with httpx.AsyncClient() as client:
                     async with client.stream("POST", "http://localhost:11434/api/chat", json=payload, timeout=180.0) as response:
@@ -1111,26 +1230,31 @@ async def v2_ask_your_query_stream(
                                     chunk_text = data.get("message", {}).get("content", "")
                                     if chunk_text:
                                         buffer += chunk_text
-                                        
                                         if TARGET_KEYWORD in buffer or TARGET_KEYWORD.lower() in buffer.lower():
                                             leaked = True
-                                            break
-                                            
-                                        if len(buffer) > target_len:
-                                            safe_to_yield = buffer[:-target_len]
-                                            buffer = buffer[-target_len:]
-                                            yield f"event: delta\ndata: {json.dumps({'text': safe_to_yield})}\n\n"
                                 except json.JSONDecodeError:
                                     pass
-                                    
-                if leaked or TARGET_KEYWORD in buffer or TARGET_KEYWORD.lower() in buffer.lower():
-                    yield f"event: delta\ndata: {json.dumps({'text': '... [REDACTED: This detail is currently not available in our system.]'})}\n\n"
-                elif buffer:
-                    final_answer = buffer
-                    if detected_lang:
-                        final_answer = await v2_rag_engine.translate_from_english(buffer, detected_lang, model=model)
-                    yield f"event: delta\ndata: {json.dumps({'text': final_answer})}\n\n"
-                    
+
+                if leaked:
+                    logger.warning("Sanitized a leaked internal reference in streamed answer: %r", buffer)
+                    final_answer = not_documented_message()
+                else:
+                    cleaned = _LEAK_PHRASE_PATTERNS.sub("", buffer).strip()
+                    if cleaned and cleaned[0].islower():
+                        cleaned = cleaned[0].upper() + cleaned[1:]
+
+                    if not cleaned or cleaned.strip() == FALLBACK_MESSAGE.strip():
+                        # The model declined after reading real chunks --
+                        # same case sanitize_answer() handles for the
+                        # non-streaming endpoint. Show our branded message,
+                        # not the raw system-prompt fallback line.
+                        final_answer = not_documented_message()
+                    else:
+                        final_answer = cleaned
+                        if detected_lang:
+                            final_answer = await v2_rag_engine.translate_from_english(cleaned, detected_lang, model=model)
+
+                yield f"event: delta\ndata: {json.dumps({'text': final_answer})}\n\n"
                 yield f"event: done\ndata: {json.dumps({'session_id': session})}\n\n"
             except Exception as e:
                 logger.error("V2 Stream Ollama Error: %s", str(e))
