@@ -1293,17 +1293,8 @@ STATIC_MODEL_NAME = "qwen2.5-coder:7b"
 
 class AdminDbConfigRequest(BaseModel):
     environment: str = "default"
-    tables: list[str]
-
-class GlobalQuestionRequest(BaseModel):
-    environment: str = "default"
-    question: str
-
-
-# @app.get("/admin/environments")
-class AdminDbConfigRequest(BaseModel):
-    environment: str = "default"
-    tables: list[str]
+    tables: list[str] = []
+    views: list[str] = []
 
 class GlobalQuestionRequest(BaseModel):
     environment: str = "default"
@@ -1341,15 +1332,17 @@ def save_admin_db_config(req: AdminDbConfigRequest):
     if req.environment not in config_data:
         raise HTTPException(status_code=400, detail=f"Environment '{req.environment}' not found. Please connect first.")
 
-    parsed_tables = []
-    for t in req.tables:
-        try:
-            parsed = _parse_table(t)
-            parsed_tables.append(list(parsed))
-        except Exception:
-            raise HTTPException(status_code=400, detail=f"Invalid table format: {t}. Must be 'schema.table'")
+    def parse_all(names, kind):
+        parsed = []
+        for t in names or []:
+            try:
+                parsed.append(list(_parse_table(t)))
+            except Exception:
+                raise HTTPException(status_code=400, detail=f"Invalid {kind} format: {t}. Must be 'schema.{kind}'")
+        return parsed
 
-    config_data[req.environment]["tables"] = parsed_tables
+    config_data[req.environment]["tables"] = parse_all(req.tables, "table")
+    config_data[req.environment]["views"] = parse_all(req.views, "view")
 
     try:
         with open(ADMIN_CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -1358,6 +1351,10 @@ def save_admin_db_config(req: AdminDbConfigRequest):
         raise HTTPException(status_code=500, detail=f"Failed to save configuration: {e}")
 
     return {"status": "success", "message": "Global configuration saved successfully."}
+
+def _selected_objects(config: dict) -> list[tuple]:
+    """Tables and views picked for an environment, as (schema, name) pairs."""
+    return [tuple(t) for t in (config.get("tables") or []) + (config.get("views") or [])]
 
 @app.get("/admin/get-db-config")
 def get_admin_db_config(environment: str = "default"):
@@ -1498,13 +1495,13 @@ def ask_global_db_query(request: GlobalQuestionRequest):
         )
 
         logger.info("Extracting schema...")
-        tables_tuple = [tuple(t) for t in config["tables"]]
+        tables_tuple = _selected_objects(config)
         if not tables_tuple:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Environment '{request.environment}' has no tables configured. "
-                    "Call /admin/save-db-config to select tables before asking questions."
+                    f"Environment '{request.environment}' has no tables or views configured. "
+                    "Call /admin/save-db-config to select them before asking questions."
                 ),
             )
         schema_text = get_selected_schema_text(conn, tables_tuple)
@@ -1729,11 +1726,11 @@ def admin_generate_sql(req: GenerateSqlRequest):
     if not config:
         raise HTTPException(status_code=400, detail=f"Environment '{req.environment}' not found.")
 
-    tables_tuple = [tuple(t) for t in (config.get("tables") or [])]
+    tables_tuple = _selected_objects(config)
     if not tables_tuple:
         raise HTTPException(
             status_code=400,
-            detail=f"Environment '{req.environment}' has no tables configured.",
+            detail=f"Environment '{req.environment}' has no tables or views configured.",
         )
 
     conn = None
