@@ -142,6 +142,7 @@ def get_table_schema_text(conn, schema, table):
         if col["default"]:
             flags.append(f"DEFAULT={col['default']}")
 
+        flag_str = f"  [{', '.join(flags)}]" if flags else ""
         name = "[" + col["name"].replace("]", "]]") + "]"
         lines.append(f"  {name} {type_str}{flag_str}")
 
