@@ -325,10 +325,18 @@ def connect(req: ConnectRequest, payload: dict = Depends(verify_token)):
             "driver": req.driver
         })
         
-        # Save initial admin config with empty tables
+        # Save initial admin config
         cipher = get_cipher()
         encrypted_password = cipher.encrypt(req.password.encode("utf-8")).decode("utf-8") if req.password else ""
         
+        env_name = req.environment.strip() if req.environment and req.environment.strip() else "default"
+        
+        try:
+            with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except Exception:
+            config_data = {}
+
         initial_config = {
             "server": req.server,
             "database": req.database,
@@ -336,16 +344,11 @@ def connect(req: ConnectRequest, payload: dict = Depends(verify_token)):
             "password": encrypted_password,
             "auth_mode": req.auth_mode,
             "driver": req.driver,
-            "tables": []
+            "tables": config_data.get(env_name, {}).get("tables", []),
+            "views": config_data.get(env_name, {}).get("views", [])
         }
-        
-        try:
-            with open(ADMIN_CONFIG_FILE, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-        except Exception:
-            config_data = {}
             
-        config_data["default"] = initial_config
+        config_data[env_name] = initial_config
         with open(ADMIN_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=4)
 
