@@ -1,4 +1,195 @@
 {
+    "default": {
+        "server": "192.168.1.19",
+        "database": "Hims_Zrams",
+        "username": "Sa",
+        "password": "gAAAAABq2wg4B9o9RqcBfjGgE7ouIN9X5-D87mCsps4z3umD4TUIxNPsf4jpl17z7v9FzhR_Q0uSdnBUCeCjBOGzpyTvyL3g-A==",
+        "auth_mode": "SQL Server Authentication",
+        "driver": "",
+        "tables": [
+            [
+                "dbo",
+                "AMTRdFurn"
+            ],
+            [
+                "dbo",
+                "AMTRoadMark"
+            ],
+            [
+                "dbo",
+                "BISBrdgLst"
+            ],
+            [
+                "dbo",
+                "BISCulvInv"
+            ],
+            [
+                "dbo",
+                "CommitedProjects"
+            ],
+            [
+                "dbo",
+                "oAISBlackSpot"
+            ],
+            [
+                "dbo",
+                "RISCrossSect"
+            ],
+            [
+                "dbo",
+                "RISCWayType"
+            ],
+            [
+                "dbo",
+                "RISDrainType"
+            ],
+            [
+                "dbo",
+                "RISFWD"
+            ],
+            [
+                "dbo",
+                "risGeomSumm"
+            ],
+            [
+                "dbo",
+                "RISKmStnData"
+            ],
+            [
+                "dbo",
+                "RISLandSlide"
+            ],
+            [
+                "dbo",
+                "RISLandUse"
+            ],
+            [
+                "dbo",
+                "risLandUseP"
+            ],
+            [
+                "dbo",
+                "risLvlCross"
+            ],
+            [
+                "dbo",
+                "RISMissingSections"
+            ],
+            [
+                "dbo",
+                "RISMLAConstituency"
+            ],
+            [
+                "dbo",
+                "RISMPConstituency"
+            ],
+            [
+                "dbo",
+                "RISPaveComp"
+            ],
+            [
+                "dbo",
+                "RISPaveHist"
+            ],
+            [
+                "dbo",
+                "RISPaveType"
+            ],
+            [
+                "dbo",
+                "RISPaveWidth"
+            ],
+            [
+                "dbo",
+                "risPblcCommunUse"
+            ],
+            [
+                "dbo",
+                "risPrjWrkSts"
+            ],
+            [
+                "dbo",
+                "risRdFurn"
+            ],
+            [
+                "dbo",
+                "RISRdType"
+            ],
+            [
+                "dbo",
+                "risRghSumm"
+            ],
+            [
+                "dbo",
+                "RISROW"
+            ],
+            [
+                "dbo",
+                "risRowWdth"
+            ],
+            [
+                "dbo",
+                "RISROWSec"
+            ],
+            [
+                "dbo",
+                "RISShldType"
+            ],
+            [
+                "dbo",
+                "RISShldWidth"
+            ],
+            [
+                "dbo",
+                "risSideDitch"
+            ],
+            [
+                "dbo",
+                "risUtl"
+            ],
+            [
+                "dbo",
+                "risVisualCondSumm"
+            ],
+            [
+                "dbo",
+                "RISVisualCondUPvd"
+            ],
+            [
+                "dbo",
+                "risWaySideAments"
+            ],
+            [
+                "dbo",
+                "SurfaceType"
+            ],
+            [
+                "dbo",
+                "TISDirLinkAADT"
+            ],
+            [
+                "dbo",
+                "TISLinkVolCC"
+            ],
+            [
+                "dbo",
+                "TISTrfMaster"
+            ],
+            [
+                "dbo",
+                "RoadMaster"
+            ],
+            [
+                "dbo",
+                "LinkMaster"
+            ],
+            [
+                "dbo",
+                "RISRut"
+            ]
+        ],
+        "views": []
+    },
     "Development": {
         "server": "192.168.1.18",
         "database": "Hims_Zrams",
@@ -9,9 +200,186 @@
         "tables": [
             [
                 "dbo",
+                "AMTRdFurn"
+            ],
+            [
+                "dbo",
+                "AMTRoadMark"
+            ],
+            [
+                "dbo",
+                "BISBrdgLst"
+            ],
+            [
+                "dbo",
+                "BISCulvInv"
+            ],
+            [
+                "dbo",
+                "CommitedProjects"
+            ],
+            [
+                "dbo",
+                "oAISBlackSpot"
+            ],
+            [
+                "dbo",
+                "RISCrossSect"
+            ],
+            [
+                "dbo",
+                "RISCWayType"
+            ],
+            [
+                "dbo",
+                "RISDrainType"
+            ],
+            [
+                "dbo",
+                "RISFWD"
+            ],
+            [
+                "dbo",
+                "risGeomSumm"
+            ],
+            [
+                "dbo",
+                "RISKmStnData"
+            ],
+            [
+                "dbo",
+                "RISLandSlide"
+            ],
+            [
+                "dbo",
+                "RISLandUse"
+            ],
+            [
+                "dbo",
+                "risLandUseP"
+            ],
+            [
+                "dbo",
+                "risLvlCross"
+            ],
+            [
+                "dbo",
+                "RISMissingSections"
+            ],
+            [
+                "dbo",
+                "RISMLAConstituency"
+            ],
+            [
+                "dbo",
+                "RISMPConstituency"
+            ],
+            [
+                "dbo",
+                "RISPaveComp"
+            ],
+            [
+                "dbo",
+                "RISPaveHist"
+            ],
+            [
+                "dbo",
+                "RISPaveType"
+            ],
+            [
+                "dbo",
+                "RISPaveWidth"
+            ],
+            [
+                "dbo",
+                "risPblcCommunUse"
+            ],
+            [
+                "dbo",
+                "risPrjWrkSts"
+            ],
+            [
+                "dbo",
+                "risRdFurn"
+            ],
+            [
+                "dbo",
+                "RISRdType"
+            ],
+            [
+                "dbo",
+                "risRghSumm"
+            ],
+            [
+                "dbo",
+                "RISROW"
+            ],
+            [
+                "dbo",
+                "risRowWdth"
+            ],
+            [
+                "dbo",
+                "RISROWSec"
+            ],
+            [
+                "dbo",
+                "RISShldType"
+            ],
+            [
+                "dbo",
+                "RISShldWidth"
+            ],
+            [
+                "dbo",
+                "risSideDitch"
+            ],
+            [
+                "dbo",
+                "risUtl"
+            ],
+            [
+                "dbo",
+                "risVisualCondSumm"
+            ],
+            [
+                "dbo",
+                "RISVisualCondUPvd"
+            ],
+            [
+                "dbo",
+                "risWaySideAments"
+            ],
+            [
+                "dbo",
+                "SurfaceType"
+            ],
+            [
+                "dbo",
+                "TISDirLinkAADT"
+            ],
+            [
+                "dbo",
+                "TISLinkVolCC"
+            ],
+            [
+                "dbo",
+                "TISTrfMaster"
+            ],
+            [
+                "dbo",
                 "RoadMaster"
+            ],
+            [
+                "dbo",
+                "LinkMaster"
+            ],
+            [
+                "dbo",
+                "RISRut"
             ]
-        ]
+        ],
+        "views": []
     },
     "Qa": {
         "server": "192.168.1.19",
@@ -43,11 +411,15 @@
             ],
             [
                 "dbo",
-                "RISCWayType"
+                "oAISBlackSpot"
             ],
             [
                 "dbo",
                 "RISCrossSect"
+            ],
+            [
+                "dbo",
+                "RISCWayType"
             ],
             [
                 "dbo",
@@ -56,6 +428,10 @@
             [
                 "dbo",
                 "RISFWD"
+            ],
+            [
+                "dbo",
+                "risGeomSumm"
             ],
             [
                 "dbo",
@@ -71,15 +447,23 @@
             ],
             [
                 "dbo",
+                "risLandUseP"
+            ],
+            [
+                "dbo",
+                "risLvlCross"
+            ],
+            [
+                "dbo",
+                "RISMissingSections"
+            ],
+            [
+                "dbo",
                 "RISMLAConstituency"
             ],
             [
                 "dbo",
                 "RISMPConstituency"
-            ],
-            [
-                "dbo",
-                "RISMissingSections"
             ],
             [
                 "dbo",
@@ -99,11 +483,15 @@
             ],
             [
                 "dbo",
-                "RISROW"
+                "risPblcCommunUse"
             ],
             [
                 "dbo",
-                "RISROWSec"
+                "risPrjWrkSts"
+            ],
+            [
+                "dbo",
+                "risRdFurn"
             ],
             [
                 "dbo",
@@ -111,7 +499,19 @@
             ],
             [
                 "dbo",
-                "RISRut"
+                "risRghSumm"
+            ],
+            [
+                "dbo",
+                "RISROW"
+            ],
+            [
+                "dbo",
+                "risRowWdth"
+            ],
+            [
+                "dbo",
+                "RISROWSec"
             ],
             [
                 "dbo",
@@ -123,15 +523,23 @@
             ],
             [
                 "dbo",
+                "risSideDitch"
+            ],
+            [
+                "dbo",
+                "risUtl"
+            ],
+            [
+                "dbo",
+                "risVisualCondSumm"
+            ],
+            [
+                "dbo",
                 "RISVisualCondUPvd"
             ],
             [
                 "dbo",
-                "RoadMaster"
-            ],
-            [
-                "dbo",
-                "Roads"
+                "risWaySideAments"
             ],
             [
                 "dbo",
@@ -151,11 +559,82 @@
             ],
             [
                 "dbo",
+                "RoadMaster"
+            ],
+            [
+                "dbo",
+                "LinkMaster"
+            ],
+            [
+                "dbo",
+                "RISRut"
+            ]
+        ],
+        "views": []
+    },
+    "HIMS_RRAMS": {
+        "server": "192.168.1.19",
+        "database": "HIMS_RRAMS",
+        "username": "Sa",
+        "password": "gAAAAABql69zkSf8I2TcHZ_HLk0P9ddll-jJV5LBKnngucoO8Z_rUg59pg8RYIUiMsjyqdpgPIcNDu6DgIHNq6CB63BSknyehA==",
+        "auth_mode": "SQL Server Authentication",
+        "driver": "",
+        "tables": [
+            [
+                "dbo",
+                "AMTRdFurn"
+            ],
+            [
+                "dbo",
+                "AMTRoadMark"
+            ],
+            [
+                "dbo",
+                "BISBrdgLst"
+            ],
+            [
+                "dbo",
+                "BISCulvInv"
+            ],
+            [
+                "dbo",
+                "CommitedProjects"
+            ],
+            [
+                "dbo",
                 "oAISBlackSpot"
             ],
             [
                 "dbo",
+                "RISCrossSect"
+            ],
+            [
+                "dbo",
+                "RISCWayType"
+            ],
+            [
+                "dbo",
+                "RISDrainType"
+            ],
+            [
+                "dbo",
+                "RISFWD"
+            ],
+            [
+                "dbo",
                 "risGeomSumm"
+            ],
+            [
+                "dbo",
+                "RISKmStnData"
+            ],
+            [
+                "dbo",
+                "RISLandSlide"
+            ],
+            [
+                "dbo",
+                "RISLandUse"
             ],
             [
                 "dbo",
@@ -164,6 +643,34 @@
             [
                 "dbo",
                 "risLvlCross"
+            ],
+            [
+                "dbo",
+                "RISMissingSections"
+            ],
+            [
+                "dbo",
+                "RISMLAConstituency"
+            ],
+            [
+                "dbo",
+                "RISMPConstituency"
+            ],
+            [
+                "dbo",
+                "RISPaveComp"
+            ],
+            [
+                "dbo",
+                "RISPaveHist"
+            ],
+            [
+                "dbo",
+                "RISPaveType"
+            ],
+            [
+                "dbo",
+                "RISPaveWidth"
             ],
             [
                 "dbo",
@@ -179,11 +686,31 @@
             ],
             [
                 "dbo",
+                "RISRdType"
+            ],
+            [
+                "dbo",
                 "risRghSumm"
             ],
             [
                 "dbo",
+                "RISROW"
+            ],
+            [
+                "dbo",
                 "risRowWdth"
+            ],
+            [
+                "dbo",
+                "RISROWSec"
+            ],
+            [
+                "dbo",
+                "RISShldType"
+            ],
+            [
+                "dbo",
+                "RISShldWidth"
             ],
             [
                 "dbo",
@@ -199,26 +726,41 @@
             ],
             [
                 "dbo",
+                "RISVisualCondUPvd"
+            ],
+            [
+                "dbo",
                 "risWaySideAments"
-            ]
-        ]
-    },
-    "HIMS_RRAMS": {
-        "server": "192.168.1.19",
-        "database": "HIMS_RRAMS",
-        "username": "Sa",
-        "password": "gAAAAABql69zkSf8I2TcHZ_HLk0P9ddll-jJV5LBKnngucoO8Z_rUg59pg8RYIUiMsjyqdpgPIcNDu6DgIHNq6CB63BSknyehA==",
-        "auth_mode": "SQL Server Authentication",
-        "driver": "",
-        "tables": [
+            ],
+            [
+                "dbo",
+                "SurfaceType"
+            ],
+            [
+                "dbo",
+                "TISDirLinkAADT"
+            ],
+            [
+                "dbo",
+                "TISLinkVolCC"
+            ],
+            [
+                "dbo",
+                "TISTrfMaster"
+            ],
             [
                 "dbo",
                 "RoadMaster"
             ],
             [
                 "dbo",
-                "BMSBridgeDetails"
+                "LinkMaster"
+            ],
+            [
+                "dbo",
+                "RISRut"
             ]
-        ]
+        ],
+        "views": []
     }
 }
