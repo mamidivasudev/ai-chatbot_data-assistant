@@ -799,6 +799,108 @@
                     "RISVisualCondUPvd"
                 ],
                 "instruction": "- TABLE: For unpaved roads condition, gravel loss, and unpaved rutting, ALWAYS use [dbo].[RISVisualCondUPvd].\n  NEVER join [RISDrainType] for unpaved road gravel conditions.\n- DISTRESS COLUMNS: [GrvlSev] / [GrvlExt] = Gravel loss severity and extent. [RutSev] / [RutExt] = Unpaved rutting severity and extent. [PotSev] / [PotExt] = Pothole severity and extent.\n- EXAMPLE: Unpaved sections with severe gravel loss or severe rutting:\n    SELECT DISTINCT RoadCode, LinkCode, SectName, GrvlSev, RutSev FROM [dbo].[RISVisualCondUPvd] WHERE GrvlSev LIKE '%Severe%' OR RutSev LIKE '%Severe%';"
+            },
+            {
+                "id": "pwd_view_zonewise_road_length",
+                "name": "Zone-wise Road Length View",
+                "enabled": true,
+                "priority": 25,
+                "match": "any",
+                "keywords": [
+                    "road length by zone",
+                    "zonewise road length",
+                    "zone wise road length",
+                    "road length in zone",
+                    "zone road length",
+                    "district road length",
+                    "circle road length",
+                    "division road length",
+                    "length in kms by zone"
+                ],
+                "requires_tables": [
+                    "nmVWZonewiseRoadLength"
+                ],
+                "instruction": "- TABLE: Use [dbo].[nmVWZonewiseRoadLength] when answering questions about road lengths broken down by administrative boundaries (Zone, District, Circle, Division, SubDivision) or road classes (SH, MDR, etc.).\n- LENGTH COLUMN: Use [Length in kms] (enclosed in square brackets because of spaces).\n- AGGREGATION: Calculate total road length with SUM([Length in kms]) grouped by [Zone] (or [District], [Circle], etc.).\n- ORDERING: For top zones or descending lists, use ORDER BY SUM([Length in kms]) DESC.\n- EXAMPLE: SELECT [Zone], ROUND(SUM([Length in kms]), 2) AS [TotalLengthKm] FROM [dbo].[nmVWZonewiseRoadLength] GROUP BY [Zone] ORDER BY [TotalLengthKm] DESC;"
+            },
+            {
+                "id": "pwd_view_road_network_pivot",
+                "name": "Road Network by Zone Pivot View",
+                "enabled": true,
+                "priority": 25,
+                "match": "any",
+                "keywords": [
+                    "road network by zone",
+                    "network by zone",
+                    "zone wise network",
+                    "mdr odr sh vr by zone",
+                    "road classification by zone",
+                    "zone road network"
+                ],
+                "requires_tables": [
+                    "RdNtwZoneWisePivot"
+                ],
+                "instruction": "- TABLE: Use [dbo].[RdNtwZoneWisePivot] when answering questions about road network lengths categorized by road classification (MDR, ODR, SH, VR) broken down by Zone, District, Circle, or Division.\n- COLUMNS: The view already pivots road classifications into separate columns: [MDR], [ODR], [SH], [VR].\n- AGGREGATION: When calculating zone totals, use SUM([MDR]), SUM([SH]), SUM([ODR]), SUM([VR]) grouped by [Zone].\n- EXAMPLE: SELECT [Zone], ROUND(SUM([MDR]), 2) AS [TotalMDR], ROUND(SUM([SH]), 2) AS [TotalSH], ROUND(SUM([ODR]), 2) AS [TotalODR], ROUND(SUM([VR]), 2) AS [TotalVR] FROM [dbo].[RdNtwZoneWisePivot] GROUP BY [Zone];"
+            },
+            {
+                "id": "pwd_view_bci_condition_zonewise",
+                "name": "BCI Condition Zone-wise View",
+                "enabled": true,
+                "priority": 25,
+                "match": "any",
+                "keywords": [
+                    "bci condition zone wise",
+                    "bci by zone",
+                    "bridge condition by zone",
+                    "good fair poor very poor by zone",
+                    "bridge condition index zone",
+                    "bci zone wise"
+                ],
+                "requires_tables": [
+                    "vwBisBCICondZoneWise"
+                ],
+                "instruction": "- TABLE: Use [dbo].[vwBisBCICondZoneWise] when answering questions about Bridge Condition Index (BCI) ratings (Good, Fair, Poor, Very Poor) broken down by Zone, District, Circle, or Division.\n- CONDITION COLUMNS: The condition categories are pre-computed count columns: [Good], [Fair], [Poor], [Very Poor].\n- AGGREGATION: Calculate total bridges in each condition category using SUM([Good]), SUM([Fair]), SUM([Poor]), SUM([Very Poor]) grouped by [Zone].\n- EXAMPLE: SELECT [Zone], SUM([Good]) AS [GoodBridges], SUM([Fair]) AS [FairBridges], SUM([Poor]) AS [PoorBridges], SUM([Very Poor]) AS [VeryPoorBridges] FROM [dbo].[vwBisBCICondZoneWise] GROUP BY [Zone];"
+            },
+            {
+                "id": "pwd_view_structures_zonewise",
+                "name": "Structures (Bridges and Culverts) Zone-wise View",
+                "enabled": true,
+                "priority": 25,
+                "match": "any",
+                "keywords": [
+                    "structures zone wise",
+                    "structures by zone",
+                    "bridges and culverts by zone",
+                    "culverts by zone",
+                    "bridges by zone",
+                    "culverts and bridges by zone",
+                    "total bridges and culverts",
+                    "structures",
+                    "bridges and culverts",
+                    "culverts and bridges",
+                    "structures count",
+                    "structures in each zone"
+                ],
+                "requires_tables": [
+                    "vwBisBrdgCulvCnt"
+                ],
+                "instruction": "- TABLE: Use [dbo].[vwBisBrdgCulvCnt] when answering questions about total structures, culverts, and bridges summarized by Zone, District, Circle, or Division.\n- COLUMNS: Use [TotalCulverts] and [TotalBridges] for structure counts, or [Minor Bridges] and [Major Bridges] when bridge types are requested.\n- SURVEY YEAR: The view contains multiple survey years in [surveyID]. For latest data, filter by [surveyID] = '2025' or the latest survey year unless a specific year is asked.\n- AGGREGATION: Calculate total counts with SUM([TotalCulverts]) and SUM([TotalBridges]) grouped by [Zone].\n- EXAMPLE: SELECT [Zone], SUM([TotalCulverts]) AS [TotalCulverts], SUM([TotalBridges]) AS [TotalBridges] FROM [dbo].[vwBisBrdgCulvCnt] WHERE [surveyID] = '2025' GROUP BY [Zone] ORDER BY [Zone];"
+            },
+            {
+                "id": "pwd_dashboard_views_preference",
+                "name": "Dashboard Summary Views Preference",
+                "enabled": true,
+                "priority": 20,
+                "match": "any",
+                "keywords": [
+                    "zone wise",
+                    "zonewise",
+                    "by zone",
+                    "across zones",
+                    "zone summary",
+                    "dashboard summary"
+                ],
+                "requires_tables": [],
+                "instruction": "- VIEW SELECTION FOR ZONE SUMMARIES: When asked for high-level zone-wise summaries or dashboard metrics, prefer querying the dedicated pre-aggregated Views instead of joining raw base tables:\n  * Zone Road Length -> [dbo].[nmVWZonewiseRoadLength]\n  * Zone Road Network by Class (MDR, SH, ODR, VR) -> [dbo].[RdNtwZoneWisePivot]\n  * Zone BCI Bridge Condition (Good, Fair, Poor, Very Poor) -> [dbo].[vwBisBCICondZoneWise]\n  * Zone Structures (Culverts and Bridges) -> [dbo].[vwBisBrdgCulvCnt]\n- For specific road details, individual link chainages, or raw inspection distress records, continue using the raw base tables (RoadMaster, LinkMaster, risRghSumm, etc.)."
             }
         ]
     }

@@ -188,7 +188,24 @@
                 "RISRut"
             ]
         ],
-        "views": []
+        "views": [
+            [
+                "dbo",
+                "nmVWZonewiseRoadLength"
+            ],
+            [
+                "dbo",
+                "RdNtwZoneWisePivot"
+            ],
+            [
+                "dbo",
+                "vwBisBCICondZoneWise"
+            ],
+            [
+                "dbo",
+                "vwBisBrdgCulvCnt"
+            ]
+        ]
     },
     "Development": {
         "server": "192.168.1.18",
@@ -379,7 +396,24 @@
                 "RISRut"
             ]
         ],
-        "views": []
+        "views": [
+            [
+                "dbo",
+                "nmVWZonewiseRoadLength"
+            ],
+            [
+                "dbo",
+                "RdNtwZoneWisePivot"
+            ],
+            [
+                "dbo",
+                "vwBisBCICondZoneWise"
+            ],
+            [
+                "dbo",
+                "vwBisBrdgCulvCnt"
+            ]
+        ]
     },
     "Qa": {
         "server": "192.168.1.19",
@@ -570,7 +604,24 @@
                 "RISRut"
             ]
         ],
-        "views": []
+        "views": [
+            [
+                "dbo",
+                "nmVWZonewiseRoadLength"
+            ],
+            [
+                "dbo",
+                "RdNtwZoneWisePivot"
+            ],
+            [
+                "dbo",
+                "vwBisBCICondZoneWise"
+            ],
+            [
+                "dbo",
+                "vwBisBrdgCulvCnt"
+            ]
+        ]
     },
     "HIMS_RRAMS": {
         "server": "192.168.1.19",
@@ -761,6 +812,23 @@
                 "RISRut"
             ]
         ],
-        "views": []
+        "views": [
+            [
+                "dbo",
+                "nmVWZonewiseRoadLength"
+            ],
+            [
+                "dbo",
+                "RdNtwZoneWisePivot"
+            ],
+            [
+                "dbo",
+                "vwBisBCICondZoneWise"
+            ],
+            [
+                "dbo",
+                "vwBisBrdgCulvCnt"
+            ]
+        ]
     }
 }
