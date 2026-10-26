@@ -40,6 +40,56 @@
       "source": "api",
       "added_on": "2026-08-31",
       "enabled": true
+    },
+    {
+      "id": "vw_zone_road_len_1",
+      "question": "Total road length in Ajmer zone",
+      "sql": "SELECT ROUND(SUM([Length in kms]), 2) AS [TotalLengthKm] FROM [dbo].[nmVWZonewiseRoadLength] WHERE [Zone] = 'Ajmer'",
+      "scope": "Hims_Zrams",
+      "notes": "Zone road lengths come from nmVWZonewiseRoadLength view, length is already in km",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "vw_zone_road_len_all",
+      "question": "Show road length by zone",
+      "sql": "SELECT [Zone], ROUND(SUM([Length in kms]), 2) AS [TotalLengthKm] FROM [dbo].[nmVWZonewiseRoadLength] GROUP BY [Zone] ORDER BY [TotalLengthKm] DESC",
+      "scope": "Hims_Zrams",
+      "notes": "Group by Zone from nmVWZonewiseRoadLength view",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "vw_zone_network_pivot",
+      "question": "Road network by zone breakdown",
+      "sql": "SELECT [Zone], ROUND(SUM([MDR]), 2) AS [TotalMDR], ROUND(SUM([SH]), 2) AS [TotalSH], ROUND(SUM([ODR]), 2) AS [TotalODR], ROUND(SUM([VR]), 2) AS [TotalVR] FROM [dbo].[RdNtwZoneWisePivot] GROUP BY [Zone]",
+      "scope": "Hims_Zrams",
+      "notes": "MDR, SH, ODR, VR by zone from RdNtwZoneWisePivot view",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "vw_zone_bci_cond",
+      "question": "BCI condition zone wise",
+      "sql": "SELECT [Zone], SUM([Good]) AS [GoodBridges], SUM([Fair]) AS [FairBridges], SUM([Poor]) AS [PoorBridges], SUM([Very Poor]) AS [VeryPoorBridges] FROM [dbo].[vwBisBCICondZoneWise] GROUP BY [Zone]",
+      "scope": "Hims_Zrams",
+      "notes": "Bridge BCI condition by zone from vwBisBCICondZoneWise view",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "vw_zone_structures_cnt",
+      "question": "Structures, bridges and culverts in each zone",
+      "sql": "SELECT [Zone], SUM([TotalCulverts]) AS [TotalCulverts], SUM([TotalBridges]) AS [TotalBridges] FROM [dbo].[vwBisBrdgCulvCnt] WHERE [surveyID] = '2025' GROUP BY [Zone] ORDER BY [Zone]",
+      "scope": "Hims_Zrams",
+      "notes": "Culverts and bridges count by zone from vwBisBrdgCulvCnt view",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
     }
   ]
 }
