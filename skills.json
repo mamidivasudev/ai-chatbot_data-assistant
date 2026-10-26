@@ -852,7 +852,7 @@
                 "id": "pwd_view_bci_condition_zonewise",
                 "name": "BCI Condition Zone-wise View",
                 "enabled": true,
-                "priority": 25,
+                "priority": 16,
                 "match": "any",
                 "keywords": [
                     "bci condition zone wise",
@@ -860,12 +860,26 @@
                     "bridge condition by zone",
                     "good fair poor very poor by zone",
                     "bridge condition index zone",
-                    "bci zone wise"
+                    "bci zone wise",
+                    "fair bridges",
+                    "good bridges",
+                    "poor bridges",
+                    "very poor bridges",
+                    "fair bridge",
+                    "good bridge",
+                    "poor bridge",
+                    "very poor bridge",
+                    "bridge condition",
+                    "bridge conditions",
+                    "bridges in zone",
+                    "bci condition",
+                    "bridge rating",
+                    "bridge ratings"
                 ],
                 "requires_tables": [
                     "vwBisBCICondZoneWise"
                 ],
-                "instruction": "- TABLE: Use [dbo].[vwBisBCICondZoneWise] when answering questions about Bridge Condition Index (BCI) ratings (Good, Fair, Poor, Very Poor) broken down by Zone, District, Circle, or Division.\n- CONDITION COLUMNS: The condition categories are pre-computed count columns: [Good], [Fair], [Poor], [Very Poor].\n- AGGREGATION: Calculate total bridges in each condition category using SUM([Good]), SUM([Fair]), SUM([Poor]), SUM([Very Poor]) grouped by [Zone].\n- EXAMPLE: SELECT [Zone], SUM([Good]) AS [GoodBridges], SUM([Fair]) AS [FairBridges], SUM([Poor]) AS [PoorBridges], SUM([Very Poor]) AS [VeryPoorBridges] FROM [dbo].[vwBisBCICondZoneWise] GROUP BY [Zone];"
+                "instruction": "- TABLE: When asked about bridge conditions (Good, Fair, Poor, Very Poor) by Zone, District, Circle, or Division (e.g. 'how many fair bridges in Kota zone'), ALWAYS query [dbo].[vwBisBCICondZoneWise].\n- CRITICAL: [dbo].[BISBrdgLst] DOES NOT HAVE [Condition] or [Zone] columns! Never query [Condition] or [Zone] on [dbo].[BISBrdgLst].\n- CONDITION COLUMNS: The view pre-computes bridge counts into separate columns: [Good], [Fair], [Poor], [Very Poor].\n- AGGREGATION: Calculate bridge counts using SUM([Good]), SUM([Fair]), SUM([Poor]), or SUM([Very Poor]) grouped or filtered by [Zone].\n- EXAMPLE: SELECT SUM([Fair]) AS [FairBridges] FROM [dbo].[vwBisBCICondZoneWise] WHERE [Zone] = 'Kota';"
             },
             {
                 "id": "pwd_view_structures_zonewise",

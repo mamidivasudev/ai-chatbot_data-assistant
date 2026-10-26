@@ -90,6 +90,26 @@
       "source": "api",
       "added_on": "2026-10-26",
       "enabled": true
+    },
+    {
+      "id": "vw_fair_bridges_kota",
+      "question": "How many fair bridges in Kota zone",
+      "sql": "SELECT SUM([Fair]) AS [FairBridges] FROM [dbo].[vwBisBCICondZoneWise] WHERE [Zone] = 'Kota'",
+      "scope": "Hims_Zrams",
+      "notes": "Fair bridges count from vwBisBCICondZoneWise view",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "vw_good_bridges_ajmer",
+      "question": "Good bridges in Ajmer zone",
+      "sql": "SELECT SUM([Good]) AS [GoodBridges] FROM [dbo].[vwBisBCICondZoneWise] WHERE [Zone] = 'Ajmer'",
+      "scope": "Hims_Zrams",
+      "notes": "Good bridges count from vwBisBCICondZoneWise view",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
     }
   ]
 }
