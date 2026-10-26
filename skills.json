@@ -804,7 +804,7 @@
                 "id": "pwd_view_zonewise_road_length",
                 "name": "Zone-wise Road Length View",
                 "enabled": true,
-                "priority": 25,
+                "priority": 18,
                 "match": "any",
                 "keywords": [
                     "road length by zone",
@@ -815,7 +815,14 @@
                     "district road length",
                     "circle road length",
                     "division road length",
-                    "length in kms by zone"
+                    "length in kms by zone",
+                    "road length",
+                    "total road length",
+                    "road length in",
+                    "length in km",
+                    "zone length",
+                    "road length of",
+                    "length in zone"
                 ],
                 "requires_tables": [
                     "nmVWZonewiseRoadLength"
@@ -889,7 +896,7 @@
                 "id": "pwd_dashboard_views_preference",
                 "name": "Dashboard Summary Views Preference",
                 "enabled": true,
-                "priority": 20,
+                "priority": 15,
                 "match": "any",
                 "keywords": [
                     "zone wise",
@@ -897,10 +904,14 @@
                     "by zone",
                     "across zones",
                     "zone summary",
-                    "dashboard summary"
+                    "dashboard summary",
+                    "zone",
+                    "zones",
+                    "in zone",
+                    "dashboard"
                 ],
                 "requires_tables": [],
-                "instruction": "- VIEW SELECTION FOR ZONE SUMMARIES: When asked for high-level zone-wise summaries or dashboard metrics, prefer querying the dedicated pre-aggregated Views instead of joining raw base tables:\n  * Zone Road Length -> [dbo].[nmVWZonewiseRoadLength]\n  * Zone Road Network by Class (MDR, SH, ODR, VR) -> [dbo].[RdNtwZoneWisePivot]\n  * Zone BCI Bridge Condition (Good, Fair, Poor, Very Poor) -> [dbo].[vwBisBCICondZoneWise]\n  * Zone Structures (Culverts and Bridges) -> [dbo].[vwBisBrdgCulvCnt]\n- For specific road details, individual link chainages, or raw inspection distress records, continue using the raw base tables (RoadMaster, LinkMaster, risRghSumm, etc.)."
+                "instruction": "- VIEW SELECTION FOR ZONE SUMMARIES: When asked for high-level zone-wise summaries, road lengths by zone, or dashboard metrics, prefer querying the dedicated pre-aggregated Views instead of joining raw base tables:\n  * Zone Road Length -> [dbo].[nmVWZonewiseRoadLength]\n  * Zone Road Network by Class (MDR, SH, ODR, VR) -> [dbo].[RdNtwZoneWisePivot]\n  * Zone BCI Bridge Condition (Good, Fair, Poor, Very Poor) -> [dbo].[vwBisBCICondZoneWise]\n  * Zone Structures (Culverts and Bridges) -> [dbo].[vwBisBrdgCulvCnt]\n- CRITICAL: Base tables like [dbo].[RoadMaster] and [dbo].[LinkMaster] DO NOT HAVE a [Zone] column! NEVER use [Zone] or WHERE [Zone] = '...' on [dbo].[RoadMaster] or [dbo].[LinkMaster]. For any zone-level query, ALWAYS query the matching view above."
             }
         ]
     }
