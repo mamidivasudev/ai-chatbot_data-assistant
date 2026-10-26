@@ -273,6 +273,484 @@
                     "BISBrdgLst"
                 ],
                 "instruction": "- BRIDGE TYPE CODES: Filter minor and major bridges on the codes 'MIN' and 'MAJ', e.g. WHERE BridgeType = 'MIN', not 'Minor'.\n- TOTAL BRIDGES: COUNT(BridgeCode) FROM BISBrdgLst.\n- VERY POOR BRIDGES: COUNT(DISTINCT bl.BridgeCode) FROM BISBrdgLst bl INNER JOIN oBISBCI bc ON bc.BridgeCode = bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'."
+            },
+            {
+                "id": "pwd_chainage_interval_math",
+                "name": "Chainage Interval & Stretch Calculations",
+                "enabled": true,
+                "priority": 85,
+                "match": "any",
+                "keywords": [
+                    "stretch",
+                    "chainage",
+                    "startch",
+                    "endch",
+                    "stretch length",
+                    "poor stretch"
+                ],
+                "requires_tables": [],
+                "instruction": "- CHAINAGE IN METERS: Tables with [StartCh] and [EndCh] record chainages in meters.\n- LENGTH CALCULATION: To calculate section length in kilometers: CAST(SUM(EndCh - StartCh) / 1000.0 AS DECIMAL(10,2)).\n- CHAINAGE POINT FILTER: To find data at a specific chainage km K: WHERE StartCh <= (K * 1000) AND EndCh >= (K * 1000)."
+            },
+            {
+                "id": "pwd_roughness_iri",
+                "name": "Roughness & IRI Survey (risRghSumm)",
+                "enabled": true,
+                "priority": 110,
+                "match": "any",
+                "keywords": [
+                    "roughness",
+                    "iri",
+                    "avgiri",
+                    "irigrade",
+                    "poor stretch",
+                    "poor condition",
+                    "rgh",
+                    "ride quality"
+                ],
+                "requires_tables": [
+                    "risRghSumm"
+                ],
+                "instruction": "- TABLE: Use [dbo].[risRghSumm] for road roughness (IRI) survey results.\n- COLUMNS: [avgiri] is the numeric IRI value (m/km). [irigrade] is the grade ('Good', 'Fair', 'Poor', 'Very Poor').\n- POOR STRETCHES: When asked for poor stretches or high roughness, use: WHERE irigrade IN ('Poor', 'Very Poor') OR avgiri >= 4.0.\n- STRETCH LENGTH (KM): Calculate length in km using: CAST(SUM(EndCh - StartCh) / 1000.0 AS DECIMAL(10,2)).\n- AVERAGE IRI: Use: CAST(AVG(avgiri) AS DECIMAL(10,2)).\n- KEYS: Filter by [RoadCode] or [LinkCode] when specified."
+            },
+            {
+                "id": "pwd_rutting_depth",
+                "name": "Rutting Depth Survey (RISRut)",
+                "enabled": true,
+                "priority": 112,
+                "match": "any",
+                "keywords": [
+                    "rut",
+                    "rutting",
+                    "rutavg",
+                    "rutleft",
+                    "rutright",
+                    "rut depth"
+                ],
+                "requires_tables": [
+                    "RISRut"
+                ],
+                "instruction": "- TABLE: Use [dbo].[RISRut] for rut depth survey data.\n- COLUMNS: [RutAvg] is the average rut depth in mm. [RutLeft] and [RutRight] are left and right wheelpath rut depths.\n- SEVERE RUTTING: Filter with WHERE RutAvg >= 20 (or RutAvg >= 10 for moderate rutting).\n- LENGTH (KM): Calculate length using CAST(SUM(EndCh - StartCh) / 1000.0 AS DECIMAL(10,2)).\n- KEYS: Group or filter by [RoadCode] and [LinkCode]."
+            },
+            {
+                "id": "pwd_fwd_strength",
+                "name": "Structural Strength & Deflection (RISFWD)",
+                "enabled": true,
+                "priority": 114,
+                "match": "any",
+                "keywords": [
+                    "fwd",
+                    "deflection",
+                    "cbr",
+                    "sn",
+                    "snp",
+                    "structural number",
+                    "peakload",
+                    "bearing ratio"
+                ],
+                "requires_tables": [
+                    "RISFWD"
+                ],
+                "instruction": "- TABLE: Use [dbo].[RISFWD] for Falling Weight Deflectometer (FWD) structural survey measurements.\n- METRICS: [SN] (Structural Number), [SNP] (Modified Structural Number), [CBR] (Subgrade CBR %), [PeakLoad] (kN).\n- DEFLECTIONS: D0 through D8 represent surface deflections at measured radial offsets."
+            },
+            {
+                "id": "pwd_visual_distress",
+                "name": "Visual Condition & Surface Distress (risVisualCondSumm & RISVisualCondUPvd)",
+                "enabled": true,
+                "priority": 116,
+                "match": "any",
+                "keywords": [
+                    "visual condition",
+                    "pothole",
+                    "cracking",
+                    "ravelling",
+                    "edge break",
+                    "sdi",
+                    "distress",
+                    "potholes",
+                    "cracks"
+                ],
+                "requires_tables": [
+                    "risVisualCondSumm"
+                ],
+                "instruction": "- TABLE: Use [dbo].[risVisualCondSumm] for paved road distress and [dbo].[RISVisualCondUPvd] for unpaved roads.\n- POTHOLES: [PotVal] (pothole value/area), [PotSev] (severity), [PotExt] (extent).\n- CRACKING: [crkval] (crack area/value), [CrckSev] (severity), [CrkExt] (extent).\n- RAVELLING: [RavVal] (ravelling value), [RavSev], [RavExt].\n- EDGE BREAK: [EdgBrkVal] (edge break extent), [EdgbrkSev], [EdgbrkExt].\n- SDI: [SDIClass] represents Surface Distress Index category."
+            },
+            {
+                "id": "pwd_carriageway_type",
+                "name": "Carriageway Configuration & Lanes (RISCWayType)",
+                "enabled": true,
+                "priority": 118,
+                "match": "any",
+                "keywords": [
+                    "carriageway",
+                    "cway",
+                    "lane",
+                    "lanes",
+                    "single lane",
+                    "two lane",
+                    "intermediate lane",
+                    "four lane",
+                    "cwaytype",
+                    "dual carriageway"
+                ],
+                "requires_tables": [
+                    "RISCWayType"
+                ],
+                "instruction": "- TABLE: Use [dbo].[RISCWayType] for carriageway type and configuration.\n- COLUMN: [CwayType] stores classifications ('Single Lane', 'Intermediate Lane', '2 Lane', '4 Lane', 'Multi Lane').\n- FILTERING: Use LIKE with wildcards (e.g. WHERE CwayType LIKE '%2 Lane%' or WHERE CwayType LIKE '%Single Lane%').\n- LENGTH (KM): Calculate total length using CAST(SUM(EndCh - StartCh) / 1000.0 AS DECIMAL(10,2))."
+            },
+            {
+                "id": "pwd_pavement_width_measurements",
+                "name": "Pavement Width & Lane Counts (RISPaveWidth)",
+                "enabled": true,
+                "priority": 120,
+                "match": "any",
+                "keywords": [
+                    "pavement width",
+                    "road width",
+                    "numlanes",
+                    "number of lanes",
+                    "pavewidth",
+                    "pavewidthval"
+                ],
+                "requires_tables": [
+                    "RISPaveWidth"
+                ],
+                "instruction": "- TABLE: Use [dbo].[RISPaveWidth] for pavement width and lane count measurements.\n- COLUMNS: [PaveWidthVal] contains the numeric width in meters. [NumLanes] contains the integer count of lanes.\n- AVERAGE WIDTH: Use CAST(AVG(PaveWidthVal) AS DECIMAL(10,2))."
+            },
+            {
+                "id": "pwd_pavement_surface_types",
+                "name": "Pavement & Surface Classification (RISPaveType & SurfaceType)",
+                "enabled": true,
+                "priority": 122,
+                "match": "any",
+                "keywords": [
+                    "pavement type",
+                    "surface type",
+                    "pavetype",
+                    "surftype",
+                    "bituminous",
+                    "concrete",
+                    "bt",
+                    "cc",
+                    "flexible",
+                    "rigid",
+                    "wbm"
+                ],
+                "requires_tables": [
+                    "RISPaveType"
+                ],
+                "instruction": "- TABLE: Use [dbo].[RISPaveType] for pavement classification; [dbo].[SurfaceType] for surface material.\n- CLASSIFICATIONS: [PaveType] = 'Flexible Pavement' or 'Rigid Pavement'. [Surftype] = 'BT' (Bituminous), 'CC' (Cement Concrete), 'WBM', 'Gravel'.\n- FLEXIBLE / BT: WHERE PaveType LIKE '%Flexible%' OR Surftype = 'BT'.\n- RIGID / CC / CONCRETE: WHERE PaveType LIKE '%Rigid%' OR Surftype = 'CC'."
+            },
+            {
+                "id": "pwd_pavement_crust_composition",
+                "name": "Pavement Composition & Crust Layers (RISPaveComp)",
+                "enabled": true,
+                "priority": 124,
+                "match": "any",
+                "keywords": [
+                    "pavement composition",
+                    "crust",
+                    "layer",
+                    "thickness",
+                    "surfthick",
+                    "basethick",
+                    "subbthick",
+                    "binder",
+                    "pavecomp"
+                ],
+                "requires_tables": [
+                    "RISPaveComp"
+                ],
+                "instruction": "- TABLE: Use [dbo].[RISPaveComp] for pavement crust layers and thicknesses.\n- SURFACING LAYER: [SurfType] (surface type), [SurfThick] (thickness in mm), [SurfConstYr] (construction year).\n- BASE LAYER: [BaseType], [BaseThick] (thickness in mm), [BaseConstYr].\n- SUB-BASE LAYER: [SubBType], [SubBThick] (thickness in mm), [SubBConstYr].\n- TOTAL CRUST THICKNESS: CAST(SUM(ISNULL(SurfThick,0) + ISNULL(BaseThick,0) + ISNULL(SubBThick,0)) AS DECIMAL(10,2))."
+            },
+            {
+                "id": "pwd_pavement_maintenance_history",
+                "name": "Pavement Maintenance & Resurfacing History (RISPaveHist)",
+                "enabled": true,
+                "priority": 126,
+                "match": "any",
+                "keywords": [
+                    "last construction",
+                    "last rehabilitation",
+                    "last resurfacing",
+                    "last preventive",
+                    "lastconst",
+                    "lastrehab",
+                    "lastsurf",
+                    "maintenance history"
+                ],
+                "requires_tables": [
+                    "RISPaveHist"
+                ],
+                "instruction": "- TABLE: Use [dbo].[RISPaveHist] for historical maintenance milestones.\n- MILESTONES: [LastConst] (year constructed), [LastRehab] (year rehabilitated), [LastSurf] (year resurfaced / renewed), [LastPrvnt] (year preventive maintenance done)."
+            },
+            {
+                "id": "pwd_road_shoulder_details",
+                "name": "Road Shoulder Type & Width (RISShldWidth & RISShldType)",
+                "enabled": true,
+                "priority": 128,
+                "match": "any",
+                "keywords": [
+                    "shoulder",
+                    "shoulder width",
+                    "shoulder type",
+                    "shldtype",
+                    "shldwidth",
+                    "avgshldwdth",
+                    "paved shoulder",
+                    "earthen shoulder"
+                ],
+                "requires_tables": [
+                    "RISShldWidth"
+                ],
+                "instruction": "- TABLE: Use [dbo].[RISShldWidth] for shoulder dimensions and [dbo].[RISShldType] for shoulder materials.\n- COLUMNS: [AvgShldWdth] / [ShldWidthVal] = shoulder width in meters. [ShldType] = 'Paved', 'Earthen', 'Gravel', 'Hard'.\n- KEYS: Both tables join on [RoadCode], [LinkCode], [StartCh], [EndCh]."
+            },
+            {
+                "id": "pwd_traffic_volume_aadt",
+                "name": "Directional Traffic AADT & Volume Counts (TISDirLinkAADT & TISLinkVolCC)",
+                "enabled": true,
+                "priority": 130,
+                "match": "any",
+                "keywords": [
+                    "aadt",
+                    "traffic volume",
+                    "vehicle count",
+                    "commercial vehicles",
+                    "trucks",
+                    "buses",
+                    "cars",
+                    "totfast",
+                    "totslow",
+                    "pcu",
+                    "traffic"
+                ],
+                "requires_tables": [
+                    "TISDirLinkAADT"
+                ],
+                "instruction": "- TABLE: Use [dbo].[TISDirLinkAADT] for annual average daily traffic by link.\n- AADT: [AADT] is total Annual Average Daily Traffic. High traffic: WHERE AADT > 10000.\n- COMMERCIAL VEHICLES: (ISNULL(TwoAxle,0) + ISNULL(ThrAxle,0) + ISNULL(MultiAxle,0) + ISNULL(MiniBus,0) + ISNULL(GovtBus,0) + ISNULL(PvtBus,0)).\n- TRUCKS: (ISNULL(TwoAxle,0) + ISNULL(ThrAxle,0) + ISNULL(MultiAxle,0)).\n- CLASSIFIED COUNTS: In [dbo].[TISLinkVolCC], [PCU] is Passenger Car Units, [TrfCatg] is traffic category."
+            },
+            {
+                "id": "pwd_culvert_inventory_details",
+                "name": "Culvert Inventory & Structures (BISCulvInv)",
+                "enabled": true,
+                "priority": 132,
+                "match": "any",
+                "keywords": [
+                    "culvert",
+                    "culverts",
+                    "pipe culvert",
+                    "box culvert",
+                    "slab culvert",
+                    "culvtype",
+                    "culvcode",
+                    "spanlength",
+                    "spannum"
+                ],
+                "requires_tables": [
+                    "BISCulvInv"
+                ],
+                "instruction": "- TABLE: Use [dbo].[BISCulvInv] for culvert inventory and details.\n- TOTAL CULVERTS: COUNT(DISTINCT CulvCode).\n- CULVERT TYPES: Filter on [CulvType] ('Pipe Culvert', 'Box Culvert', 'Slab Culvert', 'Arch Culvert').\n- DIMENSIONS: [SpanNum] (number of spans), [SpanLength] (span length in meters), [PipeDia] (pipe diameter in mm), [Width] (structure width in meters).\n- KEYS: [RoadCode], [LinkCode], [Chainage], [CulvCode]."
+            },
+            {
+                "id": "pwd_road_furniture_markings",
+                "name": "Road Safety Furniture & Markings (AMTRdFurn, AMTRoadMark, risRdFurn)",
+                "enabled": true,
+                "priority": 134,
+                "match": "any",
+                "keywords": [
+                    "furniture",
+                    "road furniture",
+                    "signboard",
+                    "sign board",
+                    "crash barrier",
+                    "guard rail",
+                    "road marking",
+                    "marking",
+                    "roadfurntype"
+                ],
+                "requires_tables": [
+                    "AMTRdFurn"
+                ],
+                "instruction": "- TABLE: Use [dbo].[AMTRdFurn] for safety furniture and [dbo].[AMTRoadMark] for road markings.\n- FURNITURE TYPE: [RoadFurnType] (e.g. 'Crash Barrier', 'Sign Board', 'Delineator'). [RoadFurnCond] = condition rating.\n- MARKINGS: [RoadMarkType] = marking type; [CLMarkCond] = Centerline condition; [EdgeMarkCond] = Edgeline condition."
+            },
+            {
+                "id": "pwd_corridor_assets_amenity_data",
+                "name": "Corridor Assets, Drains & Amenities (risWaySideAments, risSideDitch, risUtl, RISKmStnData)",
+                "enabled": true,
+                "priority": 136,
+                "match": "any",
+                "keywords": [
+                    "amenity",
+                    "amenities",
+                    "wayside",
+                    "rest area",
+                    "toll plaza",
+                    "bus stop",
+                    "side ditch",
+                    "ditch",
+                    "km stone",
+                    "kilometer stone",
+                    "utility",
+                    "utilities"
+                ],
+                "requires_tables": [
+                    "risWaySideAments"
+                ],
+                "instruction": "- TABLE: Use [dbo].[risWaySideAments] for wayside amenities, [dbo].[risSideDitch] for ditches, [dbo].[risUtl] for utilities, [dbo].[RISKmStnData] for km stones.\n- WAYSIDE AMENITIES: Filter on [AssetCode] or [Remarks] for rest stops, bus shelters, toll plazas.\n- SIDE DITCHES: [risSideDitch] contains roadside drainage channels.\n- KEYS: [RoadCode], [LinkCode], [Chainage]."
+            },
+            {
+                "id": "pwd_right_of_way_boundaries",
+                "name": "Right of Way Corridor & Width (risRowWdth, RISROW, RISROWSec)",
+                "enabled": true,
+                "priority": 138,
+                "match": "any",
+                "keywords": [
+                    "row",
+                    "right of way",
+                    "row width",
+                    "corridor width",
+                    "risrow",
+                    "rowwdth",
+                    "row boundary"
+                ],
+                "requires_tables": [
+                    "risRowWdth"
+                ],
+                "instruction": "- TABLE: Use [dbo].[risRowWdth] for Right of Way (ROW) width measurements.\n- COLUMN: [wdth] is the ROW corridor width in meters.\n- AVERAGE ROW: CAST(AVG(wdth) AS DECIMAL(10,2)).\n- FEATURES: [dbo].[RISROWSec] stores corridor features in [ROWFeatr]."
+            },
+            {
+                "id": "pwd_land_use_drainage_terrain",
+                "name": "Land Use, Landslides & Road Geometry (RISLandUse, RISLandSlide, risGeomSumm, RISDrainType)",
+                "enabled": true,
+                "priority": 140,
+                "match": "any",
+                "keywords": [
+                    "land use",
+                    "landuse",
+                    "agricultural",
+                    "builtup",
+                    "forest",
+                    "landslide",
+                    "gradient",
+                    "cross slope",
+                    "curvature",
+                    "drainage",
+                    "draintype"
+                ],
+                "requires_tables": [
+                    "RISLandUse"
+                ],
+                "instruction": "- LAND USE: [dbo].[RISLandUse] classifies surroundings in [LandUse] ('Agricultural', 'Builtup', 'Commercial', 'Residential', 'Forest', 'Barren').\n- LANDSLIDES: [dbo].[RISLandSlide] records landslide-prone stretches in [LandSlide] and [ProtectWall].\n- DRAINAGE: [dbo].[RISDrainType] records side drain type in [Draintype] ('Lined', 'Unlined', 'Covered').\n- GEOMETRY: [dbo].[risGeomSumm] stores [Altitude], [Gradient], [Curv] (curvature), [CrossSlop] (camber/cross slope)."
+            },
+            {
+                "id": "pwd_railway_crossings_locations",
+                "name": "Railway Level Crossings (risLvlCross)",
+                "enabled": true,
+                "priority": 142,
+                "match": "any",
+                "keywords": [
+                    "railway crossing",
+                    "level crossing",
+                    "lc",
+                    "railway",
+                    "train crossing",
+                    "rislvlcross"
+                ],
+                "requires_tables": [
+                    "risLvlCross"
+                ],
+                "instruction": "- TABLE: Use [dbo].[risLvlCross] for railway level crossings along roads.\n- TOTAL COUNT: SELECT COUNT(*) FROM [dbo].[risLvlCross].\n- KEYS: [RoadCode], [LinkCode], [Chainage]."
+            },
+            {
+                "id": "pwd_blackspots_safety_analysis",
+                "name": "Accident Black Spots Analysis (oAISBlackSpot)",
+                "enabled": true,
+                "priority": 144,
+                "match": "any",
+                "keywords": [
+                    "black spot",
+                    "blackspot",
+                    "accident",
+                    "accidents",
+                    "fatal",
+                    "hazard",
+                    "noofacc",
+                    "bscode",
+                    "safety"
+                ],
+                "requires_tables": [
+                    "oAISBlackSpot"
+                ],
+                "instruction": "- TABLE: Use [dbo].[oAISBlackSpot] for accident black spots and hazard locations.\n- COUNT: COUNT(DISTINCT BSCode) is the total count of black spots.\n- ACCIDENTS: [NoofAcc] is the number of accidents recorded. Filter high-hazard spots with: WHERE NoofAcc >= 5 OR ORDER BY NoofAcc DESC.\n- JURISDICTION: Filter by district [Dist], division [Div], sub-division [SubDiv], circle [Circle], zone [Zone]."
+            },
+            {
+                "id": "pwd_works_projects_contracts",
+                "name": "Road Works, Projects & DLP Status (risPrjWrkSts & CommitedProjects)",
+                "enabled": true,
+                "priority": 146,
+                "match": "any",
+                "keywords": [
+                    "project",
+                    "work",
+                    "scheme",
+                    "status of work",
+                    "stsofwrk",
+                    "typeofwrk",
+                    "expenditure",
+                    "dlp",
+                    "committed projects",
+                    "sanctioned"
+                ],
+                "requires_tables": [
+                    "risPrjWrkSts"
+                ],
+                "instruction": "- TABLE: Use [dbo].[risPrjWrkSts] for project execution and maintenance contract tracking.\n- WORK STATUS: [StsOfWrk] ('Completed', 'In Progress', 'Sanctioned', 'Proposed').\n- WORK TYPE: [TypeOfWrk] ('Widening', 'Strengthening', 'Periodic Renewal', 'Patch Work').\n- SCHEME: [Scheme] (funding program, e.g. 'State Plan', 'NABARD', 'CRF', 'PMGSY').\n- EXPENDITURE: [Expenditure] (financial expenditure incurred).\n- DEFECT LIABILITY: [DLPPeriodStrt] and [DLPPeriodEnd] track the contractor defect liability period (DLP)."
+            },
+            {
+                "id": "pwd_constituency_boundaries",
+                "name": "MLA & MP Legislative Constituencies (RISMLAConstituency, RISMPConstituency, RISMissingSections)",
+                "enabled": true,
+                "priority": 148,
+                "match": "any",
+                "keywords": [
+                    "constituency",
+                    "mla",
+                    "mp",
+                    "assembly",
+                    "parliament",
+                    "missing section",
+                    "missing link",
+                    "jurisdiction"
+                ],
+                "requires_tables": [
+                    "RISMLAConstituency"
+                ],
+                "instruction": "- MLA CONSTITUENCY: [dbo].[RISMLAConstituency] maps road sections to legislative assembly seats in the [Constituency] column.\n- MP CONSTITUENCY: [dbo].[RISMPConstituency] maps road sections to parliamentary seats in the [Constituency] column.\n- MISSING SECTIONS: [dbo].[RISMissingSections] records unbuilt road gaps with [MissingLength] and [MissingType]."
+            },
+            {
+                "id": "pwd_road_endpoints_locations",
+                "name": "Road Start and End Points (RoadMaster)",
+                "enabled": true,
+                "priority": 95,
+                "match": "any",
+                "keywords": [
+                    "start",
+                    "starts",
+                    "starting",
+                    "end",
+                    "ends",
+                    "ending",
+                    "start point",
+                    "end point",
+                    "origin",
+                    "destination",
+                    "where does",
+                    "rdstrtpt",
+                    "rdendpt"
+                ],
+                "requires_tables": [
+                    "RoadMaster"
+                ],
+                "instruction": "- START POINT: [dbo].[RoadMaster].[RdStrtPt] is the starting location/point of the road.\n- END POINT: [dbo].[RoadMaster].[RdEndPt] is the ending location/point of the road.\n- START / END CHAINAGE: [StartChainage] is the starting chainage and [EndChainage] is the ending chainage.\n- EN-ROUTE VILLAGES: [RdEnrtVillages] lists villages and towns along the route.\n- EXAMPLE: When asked 'Where does <RoadCode> start?', use: SELECT RoadCode, RdStrtPt, RoadName FROM [dbo].[RoadMaster] WHERE RoadCode = '<RoadCode>'."
             }
         ]
     }
