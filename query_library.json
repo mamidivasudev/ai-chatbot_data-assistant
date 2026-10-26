@@ -140,6 +140,26 @@
       "source": "api",
       "added_on": "2026-10-26",
       "enabled": true
+    },
+    {
+      "id": "vw_bikaner_sh_len",
+      "question": "SH road length in Bikaner zone",
+      "sql": "SELECT ROUND(SUM([Length in kms]), 2) AS [TotalLengthKm] FROM [dbo].[nmVWZonewiseRoadLength] WHERE [Zone] = 'Bikaner' AND [RoadClass] = 'SH'",
+      "scope": "Hims_Zrams",
+      "notes": "Filter on RoadClass='SH' (never RoadType) in nmVWZonewiseRoadLength",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "vw_ajmer_mdr_len",
+      "question": "MDR road length in Ajmer zone",
+      "sql": "SELECT ROUND(SUM([Length in kms]), 2) AS [TotalLengthKm] FROM [dbo].[nmVWZonewiseRoadLength] WHERE [Zone] = 'Ajmer' AND [RoadClass] = 'MDR'",
+      "scope": "Hims_Zrams",
+      "notes": "Filter on RoadClass='MDR' in nmVWZonewiseRoadLength",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
     }
   ]
 }

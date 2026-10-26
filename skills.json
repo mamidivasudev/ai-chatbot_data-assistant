@@ -822,18 +822,26 @@
                     "length in km",
                     "zone length",
                     "road length of",
-                    "length in zone"
+                    "length in zone",
+                    "sh length in",
+                    "mdr length in",
+                    "sh in zone",
+                    "mdr in zone",
+                    "sh road length",
+                    "mdr road length",
+                    "roadclass",
+                    "road class"
                 ],
                 "requires_tables": [
                     "nmVWZonewiseRoadLength"
                 ],
-                "instruction": "- TABLE: Use [dbo].[nmVWZonewiseRoadLength] when answering questions about road lengths broken down by administrative boundaries (Zone, District, Circle, Division, SubDivision) or road classes (SH, MDR, etc.).\n- LENGTH COLUMN: Use [Length in kms] (enclosed in square brackets because of spaces).\n- AGGREGATION: Calculate total road length with SUM([Length in kms]) grouped by [Zone] (or [District], [Circle], etc.).\n- ORDERING: For top zones or descending lists, use ORDER BY SUM([Length in kms]) DESC.\n- EXAMPLE: SELECT [Zone], ROUND(SUM([Length in kms]), 2) AS [TotalLengthKm] FROM [dbo].[nmVWZonewiseRoadLength] GROUP BY [Zone] ORDER BY [TotalLengthKm] DESC;"
+                "instruction": "- TABLE: Use [dbo].[nmVWZonewiseRoadLength] when answering questions about road lengths broken down by administrative boundaries (Zone, District, Circle, Division, SubDivision) or road classes (SH, MDR, etc.).\n- LENGTH COLUMN: Use [Length in kms] (enclosed in square brackets because of spaces).\n- ROAD CLASS COLUMN: The classification column is strictly [RoadClass] ('SH', 'MDR', 'ODR', 'VR').\n  * NEVER use [RoadType]! [RoadType] DOES NOT EXIST in this view!\n  * Always filter with [RoadClass] = 'SH' or [RoadClass] = 'MDR' (e.g. WHERE [Zone] = 'Bikaner' AND [RoadClass] = 'SH').\n- AGGREGATION: Calculate total road length with SUM([Length in kms]) grouped or filtered by [Zone] / [RoadClass].\n- EXAMPLE: SELECT ROUND(SUM([Length in kms]), 2) AS [TotalLengthKm] FROM [dbo].[nmVWZonewiseRoadLength] WHERE [Zone] = 'Bikaner' AND [RoadClass] = 'SH';"
             },
             {
                 "id": "pwd_view_road_network_pivot",
                 "name": "Road Network by Zone Pivot View",
                 "enabled": true,
-                "priority": 25,
+                "priority": 16,
                 "match": "any",
                 "keywords": [
                     "road network by zone",
@@ -841,12 +849,20 @@
                     "zone wise network",
                     "mdr odr sh vr by zone",
                     "road classification by zone",
-                    "zone road network"
+                    "zone road network",
+                    "sh length in",
+                    "mdr length in",
+                    "sh in zone",
+                    "mdr in zone",
+                    "sh road length",
+                    "mdr road length",
+                    "sh and mdr",
+                    "odr and vr"
                 ],
                 "requires_tables": [
                     "RdNtwZoneWisePivot"
                 ],
-                "instruction": "- TABLE: Use [dbo].[RdNtwZoneWisePivot] when answering questions about road network lengths categorized by road classification (MDR, ODR, SH, VR) broken down by Zone, District, Circle, or Division.\n- COLUMNS: The view already pivots road classifications into separate columns: [MDR], [ODR], [SH], [VR].\n- AGGREGATION: When calculating zone totals, use SUM([MDR]), SUM([SH]), SUM([ODR]), SUM([VR]) grouped by [Zone].\n- EXAMPLE: SELECT [Zone], ROUND(SUM([MDR]), 2) AS [TotalMDR], ROUND(SUM([SH]), 2) AS [TotalSH], ROUND(SUM([ODR]), 2) AS [TotalODR], ROUND(SUM([VR]), 2) AS [TotalVR] FROM [dbo].[RdNtwZoneWisePivot] GROUP BY [Zone];"
+                "instruction": "- TABLE: Use [dbo].[RdNtwZoneWisePivot] when answering questions about road network lengths categorized by road classification (MDR, ODR, SH, VR) broken down by Zone, District, Circle, or Division.\n- COLUMNS: The view already pivots road classifications into separate columns: [MDR], [ODR], [SH], [VR].\n- SPECIFIC CLASS IN ZONE: For a single classification in a zone (e.g. SH in Bikaner):\n  * Query [dbo].[RdNtwZoneWisePivot]: SELECT ROUND(SUM([SH]), 2) AS [TotalSH] FROM [dbo].[RdNtwZoneWisePivot] WHERE [Zone] = 'Bikaner';\n  * OR query [dbo].[nmVWZonewiseRoadLength]: SELECT ROUND(SUM([Length in kms]), 2) AS [TotalLengthKm] FROM [dbo].[nmVWZonewiseRoadLength] WHERE [Zone] = 'Bikaner' AND [RoadClass] = 'SH';\n  * NEVER use [RoadType]! The column is strictly [RoadClass] in nmVWZonewiseRoadLength and [SH] in RdNtwZoneWisePivot."
             },
             {
                 "id": "pwd_view_bci_condition_zonewise",
