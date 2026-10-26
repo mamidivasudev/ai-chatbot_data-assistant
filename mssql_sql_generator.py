@@ -136,7 +136,7 @@ Rules:
 4. Output must start directly with SELECT.
 5. Use SELECT statements only — never UPDATE, DELETE, INSERT, DROP, ALTER, TRUNCATE, EXEC, or EXECUTE.
 6. Use square bracket quoting for table and column names: [SchemaName].[TableName].
-7. Use TOP instead of LIMIT for row limiting.
+7. Use TOP immediately after SELECT for row limiting (e.g. SELECT TOP 1 [Col] ... ORDER BY ...). NEVER place TOP at the end of the query (there is no LIMIT in T-SQL).
 8. For string patterns use LIKE with % wildcards.
 9. For date functions use GETDATE(), DATEADD(), DATEDIFF(), FORMAT() — not MySQL syntax.
 10. Every table and column you reference must appear in the Database Schema above. Never substitute a similarly named table.
@@ -160,6 +160,27 @@ Question:
             sql += ";"
     else:
         sql = raw.strip()
+
+    # Auto-fix misplaced trailing TOP or LIMIT (e.g. "... ORDER BY col DESC TOP 1")
+    top_end_match = re.search(r"\b(?:TOP|LIMIT)\s+(\d+)\s*;?$", sql, re.IGNORECASE)
+    if top_end_match:
+        n = top_end_match.group(1)
+        sql = re.sub(r"\s+\b(?:TOP|LIMIT)\s+\d+\s*;?$", "", sql, flags=re.IGNORECASE).strip()
+        if not re.search(r"^SELECT\s+DISTINCT\s+TOP\s+", sql, re.IGNORECASE) and not re.search(r"^SELECT\s+TOP\s+", sql, re.IGNORECASE):
+            if re.search(r"^SELECT\s+DISTINCT\b", sql, re.IGNORECASE):
+                sql = re.sub(r"^SELECT\s+DISTINCT\b", f"SELECT DISTINCT TOP {n}", sql, flags=re.IGNORECASE)
+            else:
+                sql = re.sub(r"^SELECT\b", f"SELECT TOP {n}", sql, flags=re.IGNORECASE)
+
+    # Auto-fix BIT column Status comparison with string literals 'Active' / 'Inactive'
+    sql = re.sub(r"\[Status\]\s*=\s*'Active'", "[Status] = 1", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\[Status\]\s*=\s*'Inactive'", "[Status] = 0", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\bStatus\s*=\s*'Active'", "Status = 1", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\bStatus\s*=\s*'Inactive'", "Status = 0", sql, flags=re.IGNORECASE)
+
+    # Auto-fix nonexistent [IsActive] on LinkMaster
+    sql = re.sub(r"\[IsActive\]", "[Status]", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\bIsActive\b", "[Status]", sql, flags=re.IGNORECASE)
 
     return sql
 

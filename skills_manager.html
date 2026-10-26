@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Database Assistant - Skills Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --primary-light: #dbeafe;
+            --success: #10b981;
+            --success-light: #d1fae5;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --danger-light: #fee2e2;
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --card-border: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --code-bg: #090d16;
+            --input-bg: #111827;
+            --input-border: #374151;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 30px 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        .header-title h1 {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-title p {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        .api-badge {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--card-bg);
+            padding: 8px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--card-border);
+            font-size: 13px;
+        }
+
+        .api-badge input {
+            background: transparent;
+            border: none;
+            color: #38bdf8;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            width: 220px;
+            outline: none;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .tab-btn {
+            background: var(--card-bg);
+            color: var(--text-muted);
+            border: 1px solid var(--card-border);
+            padding: 10px 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active, .tab-btn:hover {
+            color: #fff;
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        /* Card sections */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+        }
+
+        .card-title {
+            font-size: 17px;
+            font-weight: 700;
+            color: #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .step-badge {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        label span {
+            color: #64748b;
+            font-weight: 400;
+        }
+
+        input[type="text"], input[type="number"], select, textarea {
+            width: 100%;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            color: var(--text-main);
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+            border-color: var(--primary);
+        }
+
+        textarea.code-area {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            background: var(--code-bg);
+            color: #fbbf24;
+            min-height: 90px;
+            line-height: 1.5;
+        }
+
+        textarea.rule-area {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            background: var(--code-bg);
+            color: #38bdf8;
+            min-height: 120px;
+            line-height: 1.5;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 11px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            width: 100%;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+            width: 100%;
+        }
+
+        .btn-success:hover {
+            background: #059669;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Status & Alerts */
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-size: 14px;
+            display: none;
+            line-height: 1.4;
+        }
+
+        .alert-info {
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #93c5fd;
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #6ee7b7;
+        }
+
+        .alert-danger {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+
+        /* Skills table */
+        .skills-table-wrap {
+            overflow-x: auto;
+            max-height: 480px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        th {
+            background: #0b1120;
+            color: var(--text-muted);
+            padding: 12px;
+            position: sticky;
+            top: 0;
+            font-weight: 600;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid var(--card-border);
+            vertical-align: top;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .tag {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.08);
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin: 2px;
+            color: #e2e8f0;
+        }
+
+        .tag-table {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+        }
+
+        .btn-delete {
+            background: transparent;
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            padding: 4px 8px;
+            border-radius: 5px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .btn-delete:hover {
+            background: var(--danger);
+            color: white;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="header-title">
+                <h1>AI Database Assistant &bull; Skills Manager</h1>
+                <p>Add and manage domain skills via /admin/generate-rule and POST /admin/skills</p>
+            </div>
+            <div class="api-badge">
+                <span style="color: #64748b;">API URL:</span>
+                <input type="text" id="apiUrlInput" value="" placeholder="http://localhost:8000">
+            </div>
+        </header>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('add')">&#10010; Add New Skill</button>
+            <button class="tab-btn" onclick="switchTab('list')">&#9776; View All Skills (<span id="skillCount">0</span>)</button>
+        </div>
+
+        <!-- TAB 1: ADD NEW SKILL -->
+        <div id="tabAdd">
+            <!-- Step 1: AI Auto-Drafter -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="step-badge">STEP 1 (OPTIONAL)</span>
+                        Draft Rule from Question & Correct SQL
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Natural Language Question</label>
+                        <input type="text" id="draftQuestion" placeholder="e.g., Give me the details of link LI_MDR029_169_0">
+                    </div>
+                    <div class="form-group">
+                        <label>Correct T-SQL Query</label>
+                        <textarea class="code-area" id="draftSql" placeholder="SELECT [LinkCode], [LinkName], [RoadCode] FROM [dbo].[LinkMaster] WHERE [LinkCode] = 'LI_MDR029_169_0'"></textarea>
+                    </div>
+                </div>
+                <button class="btn btn-primary" id="btnDraft" onclick="generateRuleDraft()">
+                    <span>&#9889; Generate Rule with AI (POST /admin/generate-rule)</span>
+                </button>
+                <div id="draftAlert" class="alert"></div>
+            </div>
+
+            <!-- Step 2: Review and Save Skill -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="step-badge">STEP 2</span>
+                        Review & Save Skill (POST /admin/skills)
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Skill Name</label>
+                        <input type="text" id="skillName" placeholder="e.g., Link Details Query Format">
+                    </div>
+                    <div class="form-group">
+                        <label>Scope <span>(* applies to all databases)</span></label>
+                        <input type="text" id="skillScope" value="*" placeholder="* or Hims_Zrams">
+                    </div>
+                </div>
+
+                <div class="grid-3">
+                    <div class="form-group">
+                        <label>Priority <span>(Lower number = higher precedence)</span></label>
+                        <input type="number" id="skillPriority" value="25" min="1" max="999">
+                    </div>
+                    <div class="form-group">
+                        <label>Trigger Match Mode</label>
+                        <select id="skillMatch">
+                            <option value="any">ANY keyword matches (Recommended)</option>
+                            <option value="all">ALL keywords must match</option>
+                            <option value="always">ALWAYS active (unconditional)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Explicit ID <span>(Optional slug)</span></label>
+                        <input type="text" id="skillId" placeholder="e.g., pwd_link_details">
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Trigger Keywords <span>(comma-separated)</span></label>
+                        <input type="text" id="skillKeywords" placeholder="e.g., link details, details of link, about link">
+                    </div>
+                    <div class="form-group">
+                        <label>Required Tables / Views <span>(comma-separated)</span></label>
+                        <input type="text" id="skillTables" placeholder="e.g., LinkMaster, RoadMaster">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Instruction / Business Rule Text <span>(Instructions sent to the AI)</span></label>
+                    <textarea class="rule-area" id="skillInstruction" placeholder="- TABLE: Use [dbo].[LinkMaster] for individual road links.&#10;- EXPLICIT COLUMNS: Select LinkCode, LinkName, RoadCode, Length. Never use SELECT *."></textarea>
+                </div>
+
+                <button class="btn btn-success" id="btnSave" onclick="saveSkill()">
+                    <span>&#128190; Save Skill to System (POST /admin/skills)</span>
+                </button>
+                <div id="saveAlert" class="alert"></div>
+            </div>
+        </div>
+
+        <!-- TAB 2: VIEW ALL SKILLS -->
+        <div id="tabList" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">All Configured System Skills</div>
+                    <button class="btn btn-primary" style="width: auto; padding: 6px 14px; font-size: 13px;" onclick="loadSkillsList()">
+                        &#8635; Refresh List
+                    </button>
+                </div>
+                <div class="skills-table-wrap">
+                    <table id="skillsTable">
+                        <thead>
+                            <tr>
+                                <th style="width: 180px;">Name & ID</th>
+                                <th style="width: 80px;">Pri / Mode</th>
+                                <th style="width: 180px;">Keywords</th>
+                                <th style="width: 140px;">Tables</th>
+                                <th>Instruction</th>
+                                <th style="width: 70px;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="skillsBody">
+                            <tr><td colspan="6" style="text-align: center; color: #64748b;">Loading skills...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Set default API base URL
+        const defaultHost = window.location.origin.startsWith('http') ? window.location.origin : 'http://localhost:8000';
+        document.getElementById('apiUrlInput').value = defaultHost;
+
+        function getBaseUrl() {
+            let url = document.getElementById('apiUrlInput').value.trim();
+            if (url.endsWith('/')) url = url.slice(0, -1);
+            return url;
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            if (tab === 'add') {
+                document.getElementById('tabAdd').style.display = 'block';
+                document.getElementById('tabList').style.display = 'none';
+                event.target.classList.add('active');
+            } else {
+                document.getElementById('tabAdd').style.display = 'none';
+                document.getElementById('tabList').style.display = 'block';
+                event.target.classList.add('active');
+                loadSkillsList();
+            }
+        }
+
+        // STEP 1: Call POST /admin/generate-rule
+        async function generateRuleDraft() {
+            const question = document.getElementById('draftQuestion').value.trim();
+            const sql = document.getElementById('draftSql').value.trim();
+            const alertBox = document.getElementById('draftAlert');
+            const btn = document.getElementById('btnDraft');
+
+            if (!question || !sql) {
+                showAlert(alertBox, 'Please enter both a Question and the Correct SQL Query.', 'danger');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> AI is analyzing SQL and drafting rule...';
+            showAlert(alertBox, 'Sending to /admin/generate-rule...', 'info');
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/admin/generate-rule`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question, sql })
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to draft rule');
+                }
+
+                // Populate Step 2 inputs automatically
+                if (data.skill_name) document.getElementById('skillName').value = data.skill_name;
+                if (data.generated_rule) document.getElementById('skillInstruction').value = data.generated_rule;
+                if (data.keywords && data.keywords.length) {
+                    document.getElementById('skillKeywords').value = data.keywords.join(', ');
+                }
+                if (data.requires_tables && data.requires_tables.length) {
+                    document.getElementById('skillTables').value = data.requires_tables.join(', ');
+                }
+
+                showAlert(alertBox, 'Rule drafted successfully! You can review or edit the fields below in Step 2 before saving.', 'success');
+            } catch (err) {
+                showAlert(alertBox, 'Error: ' + err.message, 'danger');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>&#9889; Generate Rule with AI (POST /admin/generate-rule)</span>';
+            }
+        }
+
+        // STEP 2: Call POST /admin/skills
+        async function saveSkill() {
+            const name = document.getElementById('skillName').value.trim();
+            const instruction = document.getElementById('skillInstruction').value.trim();
+            const scope = document.getElementById('skillScope').value.trim() || '*';
+            const priority = parseInt(document.getElementById('skillPriority').value, 10) || 25;
+            const match = document.getElementById('skillMatch').value;
+            const idInput = document.getElementById('skillId').value.trim();
+
+            const keywordsRaw = document.getElementById('skillKeywords').value;
+            const keywords = keywordsRaw.split(',').map(k => k.trim()).filter(k => k.length > 0);
+
+            const tablesRaw = document.getElementById('skillTables').value;
+            const requires_tables = tablesRaw.split(',').map(t => t.trim()).filter(t => t.length > 0);
+
+            const alertBox = document.getElementById('saveAlert');
+            const btn = document.getElementById('btnSave');
+
+            if (!name || !instruction) {
+                showAlert(alertBox, 'Skill Name and Instruction Text are required.', 'danger');
+                return;
+            }
+
+            const payload = {
+                name: name,
+                instruction: instruction,
+                scope: scope,
+                keywords: keywords,
+                requires_tables: requires_tables,
+                priority: priority,
+                enabled: true,
+                match: match
+            };
+            if (idInput) {
+                payload.id = idInput;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Saving skill to skills.json...';
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/admin/skills`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to save skill');
+                }
+
+                showAlert(alertBox, `Skill saved successfully with ID "${data.id}"! It is now active in skills.json.`, 'success');
+                loadSkillsCount();
+            } catch (err) {
+                showAlert(alertBox, 'Error saving skill: ' + err.message, 'danger');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>&#128190; Save Skill to System (POST /admin/skills)</span>';
+            }
+        }
+
+        // Load all skills for Tab 2
+        async function loadSkillsList() {
+            const tbody = document.getElementById('skillsBody');
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b;">Loading skills...</td></tr>';
+
+            try {
+                const res = await fetch(`${getBaseUrl()}/admin/skills`);
+                const data = await res.json();
+                document.getElementById('skillCount').innerText = data.count || 0;
+
+                if (!data.skills || !data.skills.length) {
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">No skills found.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.skills.map(s => `
+                    <tr>
+                        <td>
+                            <strong>${escapeHtml(s.name)}</strong><br>
+                            <span style="font-family: monospace; font-size: 11px; color: #64748b;">${escapeHtml(s.id)}</span>
+                        </td>
+                        <td>
+                            <span class="tag">pri: ${s.priority}</span><br>
+                            <span class="tag">${s.match || 'any'}</span>
+                        </td>
+                        <td>
+                            ${(s.keywords || []).map(k => `<span class="tag">${escapeHtml(k)}</span>`).join('')}
+                        </td>
+                        <td>
+                            ${(s.requires_tables || []).map(t => `<span class="tag tag-table">${escapeHtml(t)}</span>`).join('')}
+                        </td>
+                        <td>
+                            <pre style="font-family: monospace; font-size: 11px; white-space: pre-wrap; color: #cbd5e1; max-height: 80px; overflow-y: auto;">${escapeHtml(s.instruction)}</pre>
+                        </td>
+                        <td>
+                            <button class="btn-delete" onclick="deleteSkill('${s.id}')">Delete</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="6" style="color: #f87171; text-align: center;">Failed to load skills: ${err.message}</td></tr>`;
+            }
+        }
+
+        async function loadSkillsCount() {
+            try {
+                const res = await fetch(`${getBaseUrl()}/admin/skills`);
+                const data = await res.json();
+                document.getElementById('skillCount').innerText = data.count || 0;
+            } catch (e) {}
+        }
+
+        async function deleteSkill(id) {
+            if (!confirm(`Are you sure you want to delete skill "${id}"?`)) return;
+            try {
+                const res = await fetch(`${getBaseUrl()}/admin/skills/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Delete failed');
+                loadSkillsList();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        function showAlert(el, msg, type) {
+            el.className = 'alert alert-' + type;
+            el.innerText = msg;
+            el.style.display = 'block';
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // Initial count
+        loadSkillsCount();
+    </script>
+</body>
+</html>

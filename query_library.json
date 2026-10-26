@@ -170,6 +170,46 @@
       "source": "api",
       "added_on": "2026-10-26",
       "enabled": true
+    },
+    {
+      "id": "road_start_location_mdr003",
+      "question": "where does MDR003 start",
+      "sql": "SELECT [RoadCode], [RdStrtPt], [RoadName] FROM [dbo].[RoadMaster] WHERE [RoadCode] = 'MDR003'",
+      "scope": "Hims_Zrams",
+      "notes": "Physical start point of road is RoadMaster.RdStrtPt",
+      "source": "manual",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "road_end_location_mdr003",
+      "question": "where does MDR003 end",
+      "sql": "SELECT [RoadCode], [RdEndPt], [RoadName] FROM [dbo].[RoadMaster] WHERE [RoadCode] = 'MDR003'",
+      "scope": "Hims_Zrams",
+      "notes": "Physical end point of road is RoadMaster.RdEndPt",
+      "source": "manual",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "agency_highest_active_links",
+      "question": "Which agency has the highest share of active links?",
+      "sql": "SELECT TOP 1 [Agency], COUNT(*) AS [LinkCount] FROM [dbo].[LinkMaster] WHERE [Status] = 1 GROUP BY [Agency] ORDER BY [LinkCount] DESC",
+      "scope": "Hims_Zrams",
+      "notes": "Agency column with Status=1 bit filter",
+      "source": "manual",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "active_vs_inactive_links",
+      "question": "How many links are active vs inactive?",
+      "sql": "SELECT CASE WHEN [Status] = 1 THEN 'Active' ELSE 'Inactive' END AS [Status_Desc], COUNT(*) AS [LinkCount] FROM [dbo].[LinkMaster] GROUP BY [Status]",
+      "scope": "Hims_Zrams",
+      "notes": "Group by Status bit column in LinkMaster",
+      "source": "manual",
+      "added_on": "2026-10-26",
+      "enabled": true
     }
   ]
 }

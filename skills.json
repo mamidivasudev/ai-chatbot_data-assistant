@@ -734,7 +734,7 @@
                 "id": "pwd_road_endpoints_locations",
                 "name": "Road Start and End Points (RoadMaster)",
                 "enabled": true,
-                "priority": 95,
+                "priority": 70,
                 "match": "any",
                 "keywords": [
                     "start",
@@ -754,7 +754,7 @@
                 "requires_tables": [
                     "RoadMaster"
                 ],
-                "instruction": "- START POINT: [dbo].[RoadMaster].[RdStrtPt] is the starting location/point of the road.\n- END POINT: [dbo].[RoadMaster].[RdEndPt] is the ending location/point of the road.\n- START / END CHAINAGE: [StartChainage] is the starting chainage and [EndChainage] is the ending chainage.\n- EN-ROUTE VILLAGES: [RdEnrtVillages] lists villages and towns along the route.\n- EXAMPLE: When asked 'Where does <RoadCode> start?', use: SELECT RoadCode, RdStrtPt, RoadName FROM [dbo].[RoadMaster] WHERE RoadCode = '<RoadCode>'."
+                "instruction": "- ROAD START & END LOCATIONS: When asked where a road starts or ends (e.g. 'where does MDR003 start?', 'start point of SH001'):\n  * START LOCATION: ALWAYS use [dbo].[RoadMaster].[RdStrtPt] (e.g. 'Karauli Bharatpur Border').\n  * END LOCATION: ALWAYS use [dbo].[RoadMaster].[RdEndPt] (e.g. 'Up Border (Kot)').\n  * CRITICAL: NEVER query [dbo].[LinkMaster] or [StartChainage] for 'where does a road start'! [StartChainage] is numeric chainage (0), not a location name.\n- ROADCODE VS LINKCODE:\n  * Codes like 'MDR003', 'MDR029', 'SH001', 'ODR012', 'VR100' are [RoadCode] in [dbo].[RoadMaster]. NEVER write WHERE [LinkCode] = 'MDR003'!\n  * Only codes starting with 'LI_' (e.g. 'LI_MDR029_169_0') are [LinkCode] in [dbo].[LinkMaster].\n- EXAMPLES:\n  * Where does road start: SELECT RoadCode, RdStrtPt, RoadName FROM [dbo].[RoadMaster] WHERE RoadCode = '<RoadCode>';\n  * Where does road end: SELECT RoadCode, RdEndPt, RoadName FROM [dbo].[RoadMaster] WHERE RoadCode = '<RoadCode>';"
             },
             {
                 "id": "pwd_link_status_and_agencies",
@@ -784,7 +784,7 @@
                 "requires_tables": [
                     "LinkMaster"
                 ],
-                "instruction": "- LINK STATUS BIT ENCODING: In [dbo].[LinkMaster], the [Status] column is a BIT column where 1 = Active and 0 = Inactive.\n  Always filter using numeric BIT values: WHERE [Status] = 1 or WHERE [Status] IN (1, 0).\n  NEVER filter with string literals 'Active' or 'Inactive'.\n- MANAGING AGENCY: The agency/creator is stored in [AddedBy].\n  Example: Agency with highest share of active links:\n    SELECT TOP 1 [AddedBy], COUNT(*) AS LinkCount FROM [dbo].[LinkMaster] WHERE [Status] = 1 GROUP BY [AddedBy] ORDER BY LinkCount DESC;\n  Example: Count active vs inactive links:\n    SELECT CASE WHEN [Status] = 1 THEN 'Active' ELSE 'Inactive' END AS Status_Desc, COUNT(*) AS LinkCount FROM [dbo].[LinkMaster] GROUP BY [Status];\n- LINK DETAILS: When asked for details of a specific link (e.g. 'Give me the details of link LI_MDR029_169_0'):\n  * NEVER use SELECT *! It dumps internal binary and raw audit columns.\n  * Return clean explicit columns: SELECT [LinkCode], [LinkName], [RoadCode], [StartChainage], [EndChainage], [Length], [Agency] FROM [dbo].[LinkMaster] WHERE [LinkCode] = '<LinkCode>';"
+                "instruction": "- LINK STATUS BIT ENCODING: In [dbo].[LinkMaster], the [Status] column is a BIT column where 1 = Active and 0 = Inactive.\n  * Always filter using numeric BIT values: WHERE [Status] = 1 or WHERE [Status] IN (1, 0).\n  * NEVER filter with string literals 'Active' or 'Inactive'!\n  * NEVER use [IsActive] — the column does not exist! Use [Status].\n- MANAGING AGENCY: The road agency is stored in [dbo].[LinkMaster].[Agency] (e.g. 'PWD', 'RSRDC', 'RIDCOR', 'RSHA').\n  * Example: Agency with highest share of active links:\n      SELECT TOP 1 [Agency], COUNT(*) AS [LinkCount] FROM [dbo].[LinkMaster] WHERE [Status] = 1 GROUP BY [Agency] ORDER BY [LinkCount] DESC;\n  * Example: Count active vs inactive links:\n      SELECT CASE WHEN [Status] = 1 THEN 'Active' ELSE 'Inactive' END AS [Status_Desc], COUNT(*) AS [LinkCount] FROM [dbo].[LinkMaster] GROUP BY [Status];\n- T-SQL TOP PLACEMENT: In T-SQL, TOP (N) must always be placed immediately after SELECT (e.g. SELECT TOP 1 ...). NEVER place TOP 1 at the end of the query!\n- LINK DETAILS: When asked for details of a specific link (e.g. 'Give me the details of link LI_MDR029_169_0'):\n  * NEVER use SELECT *! It dumps internal binary and raw audit columns.\n  * Return clean explicit columns: SELECT [LinkCode], [LinkName], [RoadCode], [StartChainage], [EndChainage], [Length], [Agency] FROM [dbo].[LinkMaster] WHERE [LinkCode] = '<LinkCode>';"
             },
             {
                 "id": "pwd_unpaved_road_distress",

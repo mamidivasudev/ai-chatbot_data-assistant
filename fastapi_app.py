@@ -631,6 +631,16 @@ async def serve_db_tester():
     with open(ui_path, "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
+
+@app.get("/skills-ui")
+async def serve_skills_ui():
+    from fastapi.responses import HTMLResponse
+    import os
+    ui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills_manager.html")
+    with open(ui_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
 @app.post("/upload-file")
 async def v2_upload_file_endpoint(file: UploadFile = File(...)):
     import shutil
