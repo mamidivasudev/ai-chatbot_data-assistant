@@ -249,12 +249,16 @@
                 "keywords": [
                     "station",
                     "stations",
-                    "tvc"
+                    "tvc",
+                    "axle load",
+                    "axleload",
+                    "axle load station",
+                    "axle load survey"
                 ],
                 "requires_tables": [
                     "TISTrfMaster"
                 ],
-                "instruction": "- STATION COUNT: Total traffic stations = SELECT COUNT(*) FROM TISTrfMaster. Do not filter on CountType.\n- TVC COUNT: Use exactly SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm ON tc.StnCode = tm.StnCode."
+                "instruction": "- STATION COUNT: Total traffic stations = SELECT COUNT(*) FROM TISTrfMaster. Do not filter on CountType.\n- TVC COUNT: Use exactly SELECT COUNT(DISTINCT tc.StnCode) FROM TISTVC tc INNER JOIN TISTrfMaster tm ON tc.StnCode = tm.StnCode.\n- AXLE LOAD STATIONS: In [dbo].[TISTrfMaster], [IsAxleLoad] is a BIT column (1 = Yes, 0 = No). To count axle load survey stations, use:\n    SELECT COUNT(DISTINCT StnCode) AS AxleLoad_Station_Count FROM [dbo].[TISTrfMaster] WHERE IsAxleLoad = 1;"
             },
             {
                 "id": "pwd_bridges_structures",
@@ -272,7 +276,7 @@
                 "requires_tables": [
                     "BISBrdgLst"
                 ],
-                "instruction": "- BRIDGE TYPE CODES: Filter minor and major bridges on the codes 'MIN' and 'MAJ', e.g. WHERE BridgeType = 'MIN', not 'Minor'.\n- TOTAL BRIDGES: COUNT(BridgeCode) FROM BISBrdgLst.\n- VERY POOR BRIDGES: COUNT(DISTINCT bl.BridgeCode) FROM BISBrdgLst bl INNER JOIN oBISBCI bc ON bc.BridgeCode = bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'."
+                "instruction": "- BRIDGE TYPE CODES: Filter minor and major bridges on the codes 'MIN' and 'MAJ', e.g. WHERE BridgeType = 'MIN', not 'Minor'.\n- TOTAL BRIDGES: COUNT(BridgeCode) FROM BISBrdgLst.\n- VERY POOR BRIDGES: COUNT(DISTINCT bl.BridgeCode) FROM BISBrdgLst bl INNER JOIN oBISBCI bc ON bc.BridgeCode = bl.BridgeCode WHERE bc.BciRtng = 'Very Poor'.\n- BRIDGE LENGTH: In [dbo].[BISBrdgLst], bridge length is strictly in the [BridgeLength] column. Never use [Length].\n- LIST BRIDGES ON ROAD: SELECT bl.BridgeCode, bl.BridgeName, bl.Chainage, bl.BridgeLength FROM [dbo].[BISBrdgLst] bl WHERE bl.RoadCode = '<RoadCode>' AND bl.BridgeCode NOT LIKE 'N%'."
             },
             {
                 "id": "pwd_chainage_interval_math",
@@ -310,7 +314,7 @@
                 "requires_tables": [
                     "risRghSumm"
                 ],
-                "instruction": "- TABLE: Use [dbo].[risRghSumm] for road roughness (IRI) survey results.\n- COLUMNS: [avgiri] is the numeric IRI value (m/km). [irigrade] is the grade ('Good', 'Fair', 'Poor', 'Very Poor').\n- POOR STRETCHES: When asked for poor stretches or high roughness, use: WHERE irigrade IN ('Poor', 'Very Poor') OR avgiri >= 4.0.\n- STRETCH LENGTH (KM): Calculate length in km using: CAST(SUM(EndCh - StartCh) / 1000.0 AS DECIMAL(10,2)).\n- AVERAGE IRI: Use: CAST(AVG(avgiri) AS DECIMAL(10,2)).\n- KEYS: Filter by [RoadCode] or [LinkCode] when specified."
+                "instruction": "- TABLE: Use [dbo].[risRghSumm] for road roughness (IRI) survey results.\n- COLUMNS: [avgiri] is the numeric IRI value (m/km). [irigrade] is the grade ('Good', 'Fair', 'Poor', 'Very Poor').\n- POOR STRETCHES: When asked for poor stretches or high roughness, use: WHERE irigrade IN ('Poor', 'Very Poor') OR avgiri >= 4.0.\n- STRETCH LENGTH (KM): Calculate length in km using: CAST(SUM(EndCh - StartCh) / 1000.0 AS DECIMAL(10,2)).\n- AVERAGE IRI: Use: CAST(AVG(avgiri) AS DECIMAL(10,2)).\n- KEYS: Filter by [RoadCode] or [LinkCode] when specified.\n- TOP N DISTINCT LINKS: Each link has multiple stretch rows in [risRghSumm]. When asked for the top or worst N links with highest roughness, you MUST group by [LinkCode], e.g.:\n    SELECT TOP 5 [LinkCode], MAX([avgiri]) AS max_iri FROM [dbo].[risRghSumm] GROUP BY [LinkCode] ORDER BY max_iri DESC;\n  Do not omit GROUP BY, or duplicate link codes will occupy the top 5 slots."
             },
             {
                 "id": "pwd_rutting_depth",
@@ -751,6 +755,50 @@
                     "RoadMaster"
                 ],
                 "instruction": "- START POINT: [dbo].[RoadMaster].[RdStrtPt] is the starting location/point of the road.\n- END POINT: [dbo].[RoadMaster].[RdEndPt] is the ending location/point of the road.\n- START / END CHAINAGE: [StartChainage] is the starting chainage and [EndChainage] is the ending chainage.\n- EN-ROUTE VILLAGES: [RdEnrtVillages] lists villages and towns along the route.\n- EXAMPLE: When asked 'Where does <RoadCode> start?', use: SELECT RoadCode, RdStrtPt, RoadName FROM [dbo].[RoadMaster] WHERE RoadCode = '<RoadCode>'."
+            },
+            {
+                "id": "pwd_link_status_and_agencies",
+                "name": "Link Active Status & Managing Agencies (LinkMaster)",
+                "enabled": true,
+                "priority": 88,
+                "match": "any",
+                "keywords": [
+                    "active",
+                    "inactive",
+                    "active link",
+                    "inactive link",
+                    "link status",
+                    "status",
+                    "agency",
+                    "agencies",
+                    "highest share",
+                    "addedby"
+                ],
+                "requires_tables": [
+                    "LinkMaster"
+                ],
+                "instruction": "- LINK STATUS BIT ENCODING: In [dbo].[LinkMaster], the [Status] column is a BIT column where 1 = Active and 0 = Inactive.\n  Always filter using numeric BIT values: WHERE [Status] = 1 or WHERE [Status] IN (1, 0).\n  NEVER filter with string literals 'Active' or 'Inactive'.\n- MANAGING AGENCY: The agency/creator is stored in [AddedBy].\n  Example: Agency with highest share of active links:\n    SELECT TOP 1 [AddedBy], COUNT(*) AS LinkCount FROM [dbo].[LinkMaster] WHERE [Status] = 1 GROUP BY [AddedBy] ORDER BY LinkCount DESC;\n  Example: Count active vs inactive links:\n    SELECT CASE WHEN [Status] = 1 THEN 'Active' ELSE 'Inactive' END AS Status_Desc, COUNT(*) AS LinkCount FROM [dbo].[LinkMaster] GROUP BY [Status];"
+            },
+            {
+                "id": "pwd_unpaved_road_distress",
+                "name": "Unpaved Roads Distress & Gravel Loss (RISVisualCondUPvd)",
+                "enabled": true,
+                "priority": 117,
+                "match": "any",
+                "keywords": [
+                    "unpaved",
+                    "gravel",
+                    "gravel loss",
+                    "unpaved road",
+                    "unpaved rutting",
+                    "grvlsev",
+                    "rutsev",
+                    "unpaved sections"
+                ],
+                "requires_tables": [
+                    "RISVisualCondUPvd"
+                ],
+                "instruction": "- TABLE: For unpaved roads condition, gravel loss, and unpaved rutting, ALWAYS use [dbo].[RISVisualCondUPvd].\n  NEVER join [RISDrainType] for unpaved road gravel conditions.\n- DISTRESS COLUMNS: [GrvlSev] / [GrvlExt] = Gravel loss severity and extent. [RutSev] / [RutExt] = Unpaved rutting severity and extent. [PotSev] / [PotExt] = Pothole severity and extent.\n- EXAMPLE: Unpaved sections with severe gravel loss or severe rutting:\n    SELECT DISTINCT RoadCode, LinkCode, SectName, GrvlSev, RutSev FROM [dbo].[RISVisualCondUPvd] WHERE GrvlSev LIKE '%Severe%' OR RutSev LIKE '%Severe%';"
             }
         ]
     }
