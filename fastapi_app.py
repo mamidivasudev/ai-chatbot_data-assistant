@@ -1841,12 +1841,14 @@ Return ONLY a JSON object:
 {{
   "generated_rule": "one sentence, imperative, naming literal columns/values; or empty string",
   "skill_name": "2-4 word title",
-  "keywords": ["2-4 SPECIFIC trigger words"],
+  "keywords": ["2-5 trigger words/phrases taken directly from the question"],
   "requires_tables": ["tables the rule references"]
 }}
 
-Keywords must be specific to this rule. NEVER use generic words that appear in most
-questions: road, roads, data, table, count, total, show, list, get, all, many.
+CRITICAL KEYWORD RULES:
+- Keywords MUST be words or phrases from the Question that a human user will actually type (e.g. for "Which links have very poor IRI grades?", keywords must be ["iri", "very poor", "iri grade", "irigrade"]).
+- NEVER output abstract technical labels like "Exact Match", "String Comparison", "SQL Query", "Select", "Filter" — users never type those!
+- NEVER use universal words: road, roads, data, table, count, total, show, list, get, all, many, which, have.
 
 Question:
 {req.question}
@@ -1868,12 +1870,31 @@ SQL:
         result = json.loads(response_text.strip())
 
         rule = str(result.get("generated_rule") or "").strip()
+        raw_keywords = [str(k).strip() for k in (result.get("keywords") or []) if str(k).strip()]
+        
+        # Discard generic abstract meta-labels
+        bad_meta = {"exact match", "string comparison", "sql query", "filter", "filtering", "selection"}
+        keywords = [k for k in raw_keywords if k.lower() not in bad_meta]
+
+        # Automatically extract domain words from the question so the skill is guaranteed to trigger
+        stopwords = {"which", "what", "where", "when", "who", "whom", "this", "that", "these", "those",
+                     "have", "has", "had", "does", "doesnt", "dont", "give", "show", "list", "tell",
+                     "with", "from", "into", "about", "some", "many", "much", "each", "every", "are", "were"}
+        q_tokens = [w.strip("?,.:;'\"!").lower() for w in req.question.split()]
+        q_keywords = [w for w in q_tokens if len(w) >= 3 and w not in stopwords]
+        
+        seen = set(k.lower() for k in keywords)
+        for qk in q_keywords:
+            if qk not in seen:
+                keywords.append(qk)
+                seen.add(qk)
+
         # "No convention here" is a useful answer, not a failure — say so plainly
         # rather than handing back an empty box the admin has to interpret.
         return {
             "generated_rule": rule,
             "skill_name": str(result.get("skill_name") or "").strip(),
-            "keywords": [str(k).strip() for k in (result.get("keywords") or []) if str(k).strip()],
+            "keywords": keywords,
             "requires_tables": [
                 str(t).strip() for t in (result.get("requires_tables") or []) if str(t).strip()
             ],

@@ -210,6 +210,16 @@
       "source": "manual",
       "added_on": "2026-10-26",
       "enabled": true
+    },
+    {
+      "id": "very_poor_iri_links",
+      "question": "Which links have very poor IRI grades?",
+      "sql": "SELECT DISTINCT [LinkCode] FROM [dbo].[risRghSumm] WHERE [irigrade] = 'Very Poor'",
+      "scope": "Hims_Zrams",
+      "notes": "Query risRghSumm for very poor IRI links",
+      "source": "manual",
+      "added_on": "2026-10-26",
+      "enabled": true
     }
   ]
 }

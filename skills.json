@@ -299,13 +299,18 @@
                 "id": "pwd_roughness_iri",
                 "name": "Roughness & IRI Survey (risRghSumm)",
                 "enabled": true,
-                "priority": 110,
+                "priority": 65,
                 "match": "any",
                 "keywords": [
                     "roughness",
                     "iri",
                     "avgiri",
                     "irigrade",
+                    "iri grade",
+                    "iri grades",
+                    "very poor",
+                    "very poor iri",
+                    "very poor links",
                     "poor stretch",
                     "poor condition",
                     "rgh",
@@ -314,7 +319,7 @@
                 "requires_tables": [
                     "risRghSumm"
                 ],
-                "instruction": "- TABLE: Use [dbo].[risRghSumm] for road roughness (IRI) survey results.\n- COLUMNS: [avgiri] is the numeric IRI value (m/km). [irigrade] is the grade ('Good', 'Fair', 'Poor', 'Very Poor').\n- POOR STRETCHES: When asked for poor stretches or high roughness, use: WHERE irigrade IN ('Poor', 'Very Poor') OR avgiri >= 4.0.\n- STRETCH LENGTH (KM): Calculate length in km using: CAST(SUM(EndCh - StartCh) / 1000.0 AS DECIMAL(10,2)).\n- AVERAGE IRI: Use: CAST(AVG(avgiri) AS DECIMAL(10,2)).\n- KEYS: Filter by [RoadCode] or [LinkCode] when specified.\n- TOP N DISTINCT LINKS: Each link has multiple stretch rows in [risRghSumm]. When asked for the top or worst N links with highest roughness, you MUST group by [LinkCode], e.g.:\n    SELECT TOP 5 [LinkCode], MAX([avgiri]) AS max_iri FROM [dbo].[risRghSumm] GROUP BY [LinkCode] ORDER BY max_iri DESC;\n  Do not omit GROUP BY, or duplicate link codes will occupy the top 5 slots."
+                "instruction": "- TABLE: Use [dbo].[risRghSumm] for road roughness (IRI) survey results and IRI grades ('Good', 'Fair', 'Poor', 'Very Poor'). NEVER query [dbo].[LinkMaster] for IRI or roughness!\n- LINKS WITH VERY POOR IRI: To find which links have very poor IRI grades (e.g. 'Which links have very poor IRI grades?'):\n    SELECT DISTINCT [LinkCode] FROM [dbo].[risRghSumm] WHERE [irigrade] = 'Very Poor';\n- COLUMNS: [avgiri] is the numeric IRI value (m/km). [irigrade] is the grade ('Good', 'Fair', 'Poor', 'Very Poor').\n- POOR STRETCHES: When asked for poor stretches or high roughness, use: WHERE irigrade IN ('Poor', 'Very Poor') OR avgiri >= 4.0.\n- STRETCH LENGTH (KM): Calculate length in km using: CAST(SUM(EndCh - StartCh) / 1000.0 AS DECIMAL(10,2)).\n- AVERAGE IRI: Use: CAST(AVG(avgiri) AS DECIMAL(10,2)).\n- KEYS: Filter by [RoadCode] or [LinkCode] when specified.\n- TOP N DISTINCT LINKS: Each link has multiple stretch rows in [risRghSumm]. When asked for the top or worst N links with highest roughness, you MUST group by [LinkCode], e.g.:\n    SELECT TOP 5 [LinkCode], MAX([avgiri]) AS max_iri FROM [dbo].[risRghSumm] GROUP BY [LinkCode] ORDER BY max_iri DESC;\n  Do not omit GROUP BY, or duplicate link codes will occupy the top 5 slots."
             },
             {
                 "id": "pwd_rutting_depth",
