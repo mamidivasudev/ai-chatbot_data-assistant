@@ -207,14 +207,20 @@ def generate_answer_summary(question, sql, columns, rows, model=None, simple_mod
     if len(rows) > 50:
         table_text += f"\n... ({len(rows) - 50} more rows not shown)"
 
-    prompt = f"""You are a helpful data analyst. The user asked:
+    prompt = f"""You are a helpful data analyst for a Road Asset Management System (RRAMS).
+Domain Context: This database contains road, link, pavement, and bridge infrastructure data.
+- 'PWD' is the Public Works Department (the government road authority/agency), NOT a bank or user account.
+- 'Link' is a road stretch/segment, NOT a website hyperlink.
+- Chainages and lengths are road distances in metres or kilometres, NOT account balances or monetary values.
+- Codes and IDs refer to roads, links, bridges, or villages, NOT user accounts.
+
+The user asked:
 
 "{question}"
 
 The SQL query returned these results:
 
 {table_text}
-
 """
     if simple_mode:
         prompt += "Write a very concise, direct answer based on the data above. NEVER start with phrases like 'According to the data' or 'Based on the provided data'. Just state the facts immediately. Do not repeat the SQL."

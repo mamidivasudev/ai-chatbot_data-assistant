@@ -772,12 +772,19 @@
                     "agency",
                     "agencies",
                     "highest share",
-                    "addedby"
+                    "addedby",
+                    "details of link",
+                    "link details",
+                    "link info",
+                    "about link",
+                    "link details of",
+                    "link information",
+                    "link"
                 ],
                 "requires_tables": [
                     "LinkMaster"
                 ],
-                "instruction": "- LINK STATUS BIT ENCODING: In [dbo].[LinkMaster], the [Status] column is a BIT column where 1 = Active and 0 = Inactive.\n  Always filter using numeric BIT values: WHERE [Status] = 1 or WHERE [Status] IN (1, 0).\n  NEVER filter with string literals 'Active' or 'Inactive'.\n- MANAGING AGENCY: The agency/creator is stored in [AddedBy].\n  Example: Agency with highest share of active links:\n    SELECT TOP 1 [AddedBy], COUNT(*) AS LinkCount FROM [dbo].[LinkMaster] WHERE [Status] = 1 GROUP BY [AddedBy] ORDER BY LinkCount DESC;\n  Example: Count active vs inactive links:\n    SELECT CASE WHEN [Status] = 1 THEN 'Active' ELSE 'Inactive' END AS Status_Desc, COUNT(*) AS LinkCount FROM [dbo].[LinkMaster] GROUP BY [Status];"
+                "instruction": "- LINK STATUS BIT ENCODING: In [dbo].[LinkMaster], the [Status] column is a BIT column where 1 = Active and 0 = Inactive.\n  Always filter using numeric BIT values: WHERE [Status] = 1 or WHERE [Status] IN (1, 0).\n  NEVER filter with string literals 'Active' or 'Inactive'.\n- MANAGING AGENCY: The agency/creator is stored in [AddedBy].\n  Example: Agency with highest share of active links:\n    SELECT TOP 1 [AddedBy], COUNT(*) AS LinkCount FROM [dbo].[LinkMaster] WHERE [Status] = 1 GROUP BY [AddedBy] ORDER BY LinkCount DESC;\n  Example: Count active vs inactive links:\n    SELECT CASE WHEN [Status] = 1 THEN 'Active' ELSE 'Inactive' END AS Status_Desc, COUNT(*) AS LinkCount FROM [dbo].[LinkMaster] GROUP BY [Status];\n- LINK DETAILS: When asked for details of a specific link (e.g. 'Give me the details of link LI_MDR029_169_0'):\n  * NEVER use SELECT *! It dumps internal binary and raw audit columns.\n  * Return clean explicit columns: SELECT [LinkCode], [LinkName], [RoadCode], [StartChainage], [EndChainage], [Length], [Agency] FROM [dbo].[LinkMaster] WHERE [LinkCode] = '<LinkCode>';"
             },
             {
                 "id": "pwd_unpaved_road_distress",

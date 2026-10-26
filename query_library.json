@@ -160,6 +160,16 @@
       "source": "api",
       "added_on": "2026-10-26",
       "enabled": true
+    },
+    {
+      "id": "link_details_mdr029",
+      "question": "Give me the details of link LI_MDR029_169_0",
+      "sql": "SELECT [LinkCode], [LinkName], [RoadCode], [StartChainage], [EndChainage], [Length], [Agency] FROM [dbo].[LinkMaster] WHERE [LinkCode] = 'LI_MDR029_169_0'",
+      "scope": "Hims_Zrams",
+      "notes": "Clean explicit columns for link details (never SELECT *)",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
     }
   ]
 }
