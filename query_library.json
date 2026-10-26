@@ -110,6 +110,36 @@
       "source": "api",
       "added_on": "2026-10-26",
       "enabled": true
+    },
+    {
+      "id": "vw_culverts_bharatpur",
+      "question": "Total culverts in Bharatpur zone",
+      "sql": "SELECT SUM([TotalCulverts]) AS [TotalCulverts] FROM [dbo].[vwBisBrdgCulvCnt] WHERE [Zone] = 'Bharatpur'",
+      "scope": "Hims_Zrams",
+      "notes": "Culverts count from vwBisBrdgCulvCnt view using SUM(TotalCulverts)",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "vw_culverts_ajmer",
+      "question": "Total culverts in Ajmer zone",
+      "sql": "SELECT SUM([TotalCulverts]) AS [TotalCulverts] FROM [dbo].[vwBisBrdgCulvCnt] WHERE [Zone] = 'Ajmer'",
+      "scope": "Hims_Zrams",
+      "notes": "Culverts count from vwBisBrdgCulvCnt view using SUM(TotalCulverts)",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
+    },
+    {
+      "id": "vw_bridges_ajmer",
+      "question": "Total bridges in Ajmer zone",
+      "sql": "SELECT SUM([TotalBridges]) AS [TotalBridges] FROM [dbo].[vwBisBrdgCulvCnt] WHERE [Zone] = 'Ajmer'",
+      "scope": "Hims_Zrams",
+      "notes": "Bridges count from vwBisBrdgCulvCnt view using SUM(TotalBridges)",
+      "source": "api",
+      "added_on": "2026-10-26",
+      "enabled": true
     }
   ]
 }

@@ -885,7 +885,7 @@
                 "id": "pwd_view_structures_zonewise",
                 "name": "Structures (Bridges and Culverts) Zone-wise View",
                 "enabled": true,
-                "priority": 25,
+                "priority": 16,
                 "match": "any",
                 "keywords": [
                     "structures zone wise",
@@ -899,12 +899,25 @@
                     "bridges and culverts",
                     "culverts and bridges",
                     "structures count",
-                    "structures in each zone"
+                    "structures in each zone",
+                    "culverts in zone",
+                    "culvert in zone",
+                    "how many culverts",
+                    "total culverts",
+                    "culvert count",
+                    "culverts",
+                    "culvert",
+                    "bridges in zone",
+                    "total culverts in",
+                    "total bridges in",
+                    "structures in zone",
+                    "culverts in",
+                    "bridges in"
                 ],
                 "requires_tables": [
                     "vwBisBrdgCulvCnt"
                 ],
-                "instruction": "- TABLE: Use [dbo].[vwBisBrdgCulvCnt] when answering questions about total structures, culverts, and bridges summarized by Zone, District, Circle, or Division.\n- COLUMNS: Use [TotalCulverts] and [TotalBridges] for structure counts, or [Minor Bridges] and [Major Bridges] when bridge types are requested.\n- SURVEY YEAR: The view contains multiple survey years in [surveyID]. For latest data, filter by [surveyID] = '2025' or the latest survey year unless a specific year is asked.\n- AGGREGATION: Calculate total counts with SUM([TotalCulverts]) and SUM([TotalBridges]) grouped by [Zone].\n- EXAMPLE: SELECT [Zone], SUM([TotalCulverts]) AS [TotalCulverts], SUM([TotalBridges]) AS [TotalBridges] FROM [dbo].[vwBisBrdgCulvCnt] WHERE [surveyID] = '2025' GROUP BY [Zone] ORDER BY [Zone];"
+                "instruction": "- TABLE: Use [dbo].[vwBisBrdgCulvCnt] when answering questions about total culverts and total bridges summarized by Zone, District, Circle, or Division (e.g. 'total culverts in Bharatpur', 'how many culverts in Ajmer zone').\n- CRITICAL AGGREGATION: [TotalCulverts] and [TotalBridges] are ALREADY integer count columns:\n  * ALWAYS use SUM([TotalCulverts]) for total culverts!\n  * ALWAYS use SUM([TotalBridges]) for total bridges!\n  * NEVER use COUNT([CulvertID]) or COUNT(*)! [CulvertID] DOES NOT EXIST in this view!\n- FILTERING & GROUPING: Filter by [Zone] = '<ZoneName>' (e.g. WHERE [Zone] = 'Bharatpur' or WHERE [Zone] = 'Ajmer').\n- EXAMPLES:\n  * Culverts in Bharatpur: SELECT SUM([TotalCulverts]) AS [TotalCulverts] FROM [dbo].[vwBisBrdgCulvCnt] WHERE [Zone] = 'Bharatpur';\n  * Culverts in Ajmer: SELECT SUM([TotalCulverts]) AS [TotalCulverts] FROM [dbo].[vwBisBrdgCulvCnt] WHERE [Zone] = 'Ajmer';\n  * Culverts and Bridges in Kota: SELECT SUM([TotalCulverts]) AS [TotalCulverts], SUM([TotalBridges]) AS [TotalBridges] FROM [dbo].[vwBisBrdgCulvCnt] WHERE [Zone] = 'Kota';"
             },
             {
                 "id": "pwd_dashboard_views_preference",
