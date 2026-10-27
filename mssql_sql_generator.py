@@ -161,6 +161,11 @@ Question:
     else:
         sql = raw.strip()
 
+    return clean_tsql(sql)
+
+
+def clean_tsql(sql):
+    """Auto-fix known syntax quirks and nonexistent column hallucinations in generated T-SQL."""
     # Auto-fix misplaced trailing TOP or LIMIT (e.g. "... ORDER BY col DESC TOP 1")
     top_end_match = re.search(r"\b(?:TOP|LIMIT)\s+(\d+)\s*;?$", sql, re.IGNORECASE)
     if top_end_match:
@@ -181,6 +186,10 @@ Question:
     # Auto-fix nonexistent [IsActive] on LinkMaster
     sql = re.sub(r"\[IsActive\]", "[Status]", sql, flags=re.IGNORECASE)
     sql = re.sub(r"\bIsActive\b", "[Status]", sql, flags=re.IGNORECASE)
+
+    # Auto-fix nonexistent [RutDepth] on RISRut
+    sql = re.sub(r"\[RutDepth\]", "[RutAvg]", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\bRutDepth\b", "[RutAvg]", sql, flags=re.IGNORECASE)
 
     return sql
 

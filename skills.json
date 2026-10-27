@@ -333,12 +333,14 @@
                     "rutavg",
                     "rutleft",
                     "rutright",
-                    "rut depth"
+                    "rut depth",
+                    "average rut depth",
+                    "average rutting"
                 ],
                 "requires_tables": [
                     "RISRut"
                 ],
-                "instruction": "- TABLE: Use [dbo].[RISRut] for rut depth survey data.\n- COLUMNS: [RutAvg] is the average rut depth in mm. [RutLeft] and [RutRight] are left and right wheelpath rut depths.\n- SEVERE RUTTING: Filter with WHERE RutAvg >= 20 (or RutAvg >= 10 for moderate rutting).\n- LENGTH (KM): Calculate length using CAST(SUM(EndCh - StartCh) / 1000.0 AS DECIMAL(10,2)).\n- KEYS: Group or filter by [RoadCode] and [LinkCode]."
+                "instruction": "- TABLE: Use [dbo].[RISRut] for rut depth survey data.\n- AVERAGE RUT DEPTH: Calculate strictly using AVG([RutAvg]).\n- COLUMNS: [RutAvg] is the average rut depth in mm. [RutLeft] and [RutRight] are left and right wheelpath rut depths.\n- SEVERE RUTTING: Filter with WHERE RutAvg >= 20 (or RutAvg >= 10 for moderate rutting).\n- LENGTH (KM): Calculate length using CAST(SUM(EndCh - StartCh) / 1000.0 AS DECIMAL(10,2)).\n- KEYS: Group or filter by [RoadCode] and [LinkCode].\n- EXAMPLE: SELECT AVG([RutAvg]) AS [AverageRutDepth] FROM [dbo].[RISRut];"
             },
             {
                 "id": "pwd_fwd_strength",

@@ -220,6 +220,16 @@
       "source": "manual",
       "added_on": "2026-10-26",
       "enabled": true
+    },
+    {
+      "id": "average_rut_depth",
+      "question": "What is the average rut depth across the entire network?",
+      "sql": "SELECT AVG([RutAvg]) AS [AverageRutDepth] FROM [dbo].[RISRut]",
+      "scope": "Hims_Zrams",
+      "notes": "Query RISRut using RutAvg column for average rut depth",
+      "source": "manual",
+      "added_on": "2026-10-27",
+      "enabled": true
     }
   ]
 }
