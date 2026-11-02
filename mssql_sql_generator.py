@@ -191,6 +191,13 @@ def clean_tsql(sql):
     sql = re.sub(r"\[RutDepth\]", "[RutAvg]", sql, flags=re.IGNORECASE)
     sql = re.sub(r"\bRutDepth\b", "[RutAvg]", sql, flags=re.IGNORECASE)
 
+    # Auto-fix column hallucinations on UnsurvandSurveyLen
+    if re.search(r"\bUnsurvandSurveyLen\b", sql, re.IGNORECASE):
+        sql = re.sub(r"(?<!Total)(?<![a-zA-Z])(?:\[SurveyedLength\]|SurveyedLength)", "[Surveyed length]", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"(?<!Total)(?<![a-zA-Z])(?:\[UnsurveyedLength\]|UnsurveyedLength)", "[Unsurveyed length]", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"(?:\[RoadClass\]|RoadClass)", "[RoadCategory]", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"(?:\[RoadType\]|RoadType)", "[RoadCategory]", sql, flags=re.IGNORECASE)
+
     return sql
 
 
