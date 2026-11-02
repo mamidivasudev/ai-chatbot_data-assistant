@@ -990,6 +990,28 @@
                     "UnsurvandSurveyLen"
                 ],
                 "instruction": "- TABLE: Use [dbo].[UnsurvandSurveyLen] for questions about surveyed and unsurveyed road lengths.\n- EXACT COLUMNS (ALWAYS USE SQUARE BRACKETS):\n  * [RoadCategory] is the road category / class ('SH', 'MDR', 'ODR', 'VR'). NEVER use [RoadClass] or [RoadType] on this view!\n  * [Surveyed length] is the surveyed length in km. Column name HAS A SPACE: use [Surveyed length], NOT [SurveyedLength].\n  * [Unsurveyed length] is the unsurveyed length in km. Column name HAS A SPACE: use [Unsurveyed length], NOT [UnsurveyedLength].\n- EXAMPLES:\n  * Total surveyed length in SH:\n    SELECT ROUND(SUM([Surveyed length]), 2) AS [TotalSurveyedKm] FROM [dbo].[UnsurvandSurveyLen] WHERE [RoadCategory] = 'SH';\n  * Surveyed vs unsurveyed by category:\n    SELECT [RoadCategory], ROUND(SUM([Surveyed length]), 2) AS [SurveyedKm], ROUND(SUM([Unsurveyed length]), 2) AS [UnsurveyedKm] FROM [dbo].[UnsurvandSurveyLen] GROUP BY [RoadCategory];"
+            },
+            {
+                "id": "pwd_view_road_type_zonewise",
+                "name": "Road Type and Lane Breakdown by Zone (VWRoadtypePivot)",
+                "enabled": true,
+                "priority": 25,
+                "match": "any",
+                "keywords": [
+                    "road type by zone",
+                    "road type breakdown",
+                    "road types by zone",
+                    "road type distribution",
+                    "lane breakdown",
+                    "double lane by zone",
+                    "single lane by zone",
+                    "four lane by zone",
+                    "intermediate lane"
+                ],
+                "requires_tables": [
+                    "VWRoadtypePivot"
+                ],
+                "instruction": "- TABLE: Use [dbo].[VWRoadtypePivot] when asked for road type, lane configuration, or lane breakdown by zone.\n- COLUMNS ARE ALREADY PIVOTED (NO [RoadType] column exists):\n  * DO NOT query or GROUP BY a nonexistent column like [RoadType]!\n  * Each lane configuration is its own numeric column: [Single lane], [Intermediate lane], [Double lane], [2L+PS], [Four lane], [Six Lane].\n  * ALWAYS use SUM(...) on these columns (never COUNT(*)):\n    SUM([Single lane]), SUM([Intermediate lane]), SUM([Double lane]), SUM([2L+PS]), SUM([Four lane]), SUM([Six Lane]).\n  * ALWAYS filter by [SurveyID] = '2025' unless another year is explicitly specified.\n- EXAMPLES:\n  * Show road type breakdown by zone:\n    SELECT [Zone], ROUND(SUM([Single lane]), 2) AS [SingleLane_km], ROUND(SUM([Intermediate lane]), 2) AS [IntermediateLane_km], ROUND(SUM([Double lane]), 2) AS [DoubleLane_km], ROUND(SUM([2L+PS]), 2) AS [TwoLanePS_km], ROUND(SUM([Four lane]), 2) AS [FourLane_km], ROUND(SUM([Six Lane]), 2) AS [SixLane_km] FROM [dbo].[VWRoadtypePivot] WHERE [SurveyID] = '2025' GROUP BY [Zone] ORDER BY [Zone];\n  * Double lane road length in Kota zone:\n    SELECT ROUND(SUM([Double lane]), 2) AS [DoubleLane_km] FROM [dbo].[VWRoadtypePivot] WHERE [Zone] = 'Kota' AND [SurveyID] = '2025';"
             }
         ]
     }

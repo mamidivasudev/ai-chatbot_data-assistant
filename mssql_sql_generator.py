@@ -198,6 +198,19 @@ def clean_tsql(sql):
         sql = re.sub(r"(?:\[RoadClass\]|RoadClass)", "[RoadCategory]", sql, flags=re.IGNORECASE)
         sql = re.sub(r"(?:\[RoadType\]|RoadType)", "[RoadCategory]", sql, flags=re.IGNORECASE)
 
+    # Auto-fix column hallucinations on VWRoadtypePivot (strictly table-isolated)
+    if re.search(r"\bVWRoadtypePivot\b", sql, re.IGNORECASE):
+        if re.search(r"\bRoadType\b", sql, re.IGNORECASE):
+            sql = re.sub(r"\[?RoadType\]?,\s*COUNT\(\*\)\s+AS\s+\[?\w+\]?",
+                         "ROUND(SUM([Single lane]), 2) AS [SingleLane_km], ROUND(SUM([Intermediate lane]), 2) AS [IntermediateLane_km], ROUND(SUM([Double lane]), 2) AS [DoubleLane_km], ROUND(SUM([2L+PS]), 2) AS [TwoLanePS_km], ROUND(SUM([Four lane]), 2) AS [FourLane_km], ROUND(SUM([Six Lane]), 2) AS [SixLane_km]",
+                         sql, flags=re.IGNORECASE)
+            sql = re.sub(r",\s*\[?RoadType\]?", "", sql, flags=re.IGNORECASE)
+        if not re.search(r"\bSurveyID\b", sql, re.IGNORECASE):
+            if re.search(r"\bWHERE\b", sql, re.IGNORECASE):
+                sql = re.sub(r"\bWHERE\b", "WHERE [SurveyID] = '2025' AND", sql, flags=re.IGNORECASE, count=1)
+            elif re.search(r"\bGROUP\s+BY\b", sql, re.IGNORECASE):
+                sql = re.sub(r"\bGROUP\s+BY\b", "WHERE [SurveyID] = '2025' GROUP BY", sql, flags=re.IGNORECASE, count=1)
+
     return sql
 
 

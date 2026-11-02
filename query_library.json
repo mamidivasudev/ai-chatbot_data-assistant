@@ -250,6 +250,26 @@
       "source": "manual",
       "added_on": "2026-11-02",
       "enabled": true
+    },
+    {
+      "id": "road_type_breakdown_by_zone",
+      "question": "Show road type breakdown by zone",
+      "sql": "SELECT [Zone], ROUND(SUM([Single lane]), 2) AS [SingleLane_km], ROUND(SUM([Intermediate lane]), 2) AS [IntermediateLane_km], ROUND(SUM([Double lane]), 2) AS [DoubleLane_km], ROUND(SUM([2L+PS]), 2) AS [TwoLanePS_km], ROUND(SUM([Four lane]), 2) AS [FourLane_km], ROUND(SUM([Six Lane]), 2) AS [SixLane_km] FROM [dbo].[VWRoadtypePivot] WHERE [SurveyID] = '2025' GROUP BY [Zone] ORDER BY [Zone]",
+      "scope": "*",
+      "notes": "Query VWRoadtypePivot using pivoted lane columns and SurveyID='2025'",
+      "source": "manual",
+      "added_on": "2026-11-02",
+      "enabled": true
+    },
+    {
+      "id": "double_lane_road_length_kota",
+      "question": "Double lane road length in Kota zone",
+      "sql": "SELECT ROUND(SUM([Double lane]), 2) AS [DoubleLane_km] FROM [dbo].[VWRoadtypePivot] WHERE [Zone] = 'Kota' AND [SurveyID] = '2025'",
+      "scope": "*",
+      "notes": "Filter VWRoadtypePivot by Zone='Kota' and SUM([Double lane])",
+      "source": "manual",
+      "added_on": "2026-11-02",
+      "enabled": true
     }
   ]
 }
