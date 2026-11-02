@@ -1006,12 +1006,41 @@
                     "double lane by zone",
                     "single lane by zone",
                     "four lane by zone",
-                    "intermediate lane"
+                    "intermediate lane",
+                    "percentage distribution of road types",
+                    "road type percentage",
+                    "percentage of road types"
                 ],
                 "requires_tables": [
                     "VWRoadtypePivot"
                 ],
                 "instruction": "- TABLE: Use [dbo].[VWRoadtypePivot] when asked for road type, lane configuration, or lane breakdown by zone.\n- COLUMNS ARE ALREADY PIVOTED (NO [RoadType] column exists):\n  * DO NOT query or GROUP BY a nonexistent column like [RoadType]!\n  * Each lane configuration is its own numeric column: [Single lane], [Intermediate lane], [Double lane], [2L+PS], [Four lane], [Six Lane].\n  * ALWAYS use SUM(...) on these columns (never COUNT(*)):\n    SUM([Single lane]), SUM([Intermediate lane]), SUM([Double lane]), SUM([2L+PS]), SUM([Four lane]), SUM([Six Lane]).\n  * ALWAYS filter by [SurveyID] = '2025' unless another year is explicitly specified.\n- EXAMPLES:\n  * Show road type breakdown by zone:\n    SELECT [Zone], ROUND(SUM([Single lane]), 2) AS [SingleLane_km], ROUND(SUM([Intermediate lane]), 2) AS [IntermediateLane_km], ROUND(SUM([Double lane]), 2) AS [DoubleLane_km], ROUND(SUM([2L+PS]), 2) AS [TwoLanePS_km], ROUND(SUM([Four lane]), 2) AS [FourLane_km], ROUND(SUM([Six Lane]), 2) AS [SixLane_km] FROM [dbo].[VWRoadtypePivot] WHERE [SurveyID] = '2025' GROUP BY [Zone] ORDER BY [Zone];\n  * Double lane road length in Kota zone:\n    SELECT ROUND(SUM([Double lane]), 2) AS [DoubleLane_km] FROM [dbo].[VWRoadtypePivot] WHERE [Zone] = 'Kota' AND [SurveyID] = '2025';"
+            },
+            {
+                "id": "pwd_view_roughness_statewise",
+                "name": "Road Roughness Condition by Category (risVWStateWiseRgh)",
+                "enabled": true,
+                "priority": 25,
+                "match": "any",
+                "keywords": [
+                    "roughness by category",
+                    "road roughness",
+                    "roughness condition",
+                    "good roughness",
+                    "poor roughness",
+                    "fair roughness",
+                    "very poor roughness",
+                    "very good roughness",
+                    "roughness distribution",
+                    "road condition by category",
+                    "roads in good condition",
+                    "roads in poor condition",
+                    "roads in fair condition"
+                ],
+                "requires_tables": [
+                    "risVWStateWiseRgh"
+                ],
+                "instruction": "- TABLE: Use [dbo].[risVWStateWiseRgh] for road roughness condition summaries and category breakdowns across network or zones.\n- COLUMNS:\n  * [Catg] is the roughness category: 'Very Good', 'Good', 'Fair', 'Poor', 'Very Poor'. NEVER use [RoughnessCategory] or [Condition]!\n  * [Length (km)] is length in km. ALWAYS sum using: SUM([Length (km)]).\n  * [Zone] is available for zone-level filtering or grouping.\n  * [surveyid] survey year: ALWAYS filter by [surveyid] = '2025' unless another year is explicitly specified.\n- EXAMPLES:\n  * Roughness by category:\n    SELECT [Catg], ROUND(SUM([Length (km)]), 2) AS [TotalLengthKm] FROM [dbo].[risVWStateWiseRgh] WHERE [surveyid] = '2025' GROUP BY [Catg] ORDER BY [TotalLengthKm] DESC;\n  * Roads in Good condition:\n    SELECT ROUND(SUM([Length (km)]), 2) AS [GoodLengthKm] FROM [dbo].[risVWStateWiseRgh] WHERE [Catg] = 'Good' AND [surveyid] = '2025';\n  * Total length of Poor and Very Poor roads:\n    SELECT ROUND(SUM([Length (km)]), 2) AS [PoorLengthKm] FROM [dbo].[risVWStateWiseRgh] WHERE [Catg] IN ('Poor', 'Very Poor') AND [surveyid] = '2025';"
             }
         ]
     }

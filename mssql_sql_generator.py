@@ -211,6 +211,21 @@ def clean_tsql(sql):
             elif re.search(r"\bGROUP\s+BY\b", sql, re.IGNORECASE):
                 sql = re.sub(r"\bGROUP\s+BY\b", "WHERE [SurveyID] = '2025' GROUP BY", sql, flags=re.IGNORECASE, count=1)
 
+    # Auto-fix column hallucinations on risVWStateWiseRgh (strictly table-isolated)
+    if re.search(r"\brisVWStateWiseRgh\b", sql, re.IGNORECASE):
+        sql = re.sub(r"(?:(?<![a-zA-Z])\[?Category\]?|\[?RoughnessCategory\]?|\[?Condition\]?)", "[Catg]", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\[?Length\]?(?!\s*\()", "[Length (km)]", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\[Length\s*\(km\)\]\s*\(km\)\]", "[Length (km)]", sql, flags=re.IGNORECASE)
+        if not re.search(r"\bsurveyid\b", sql, re.IGNORECASE):
+            if re.search(r"\bWHERE\b", sql, re.IGNORECASE):
+                sql = re.sub(r"\bWHERE\b", "WHERE [surveyid] = '2025' AND", sql, flags=re.IGNORECASE, count=1)
+            elif re.search(r"\bGROUP\s+BY\b", sql, re.IGNORECASE):
+                sql = re.sub(r"\bGROUP\s+BY\b", "WHERE [surveyid] = '2025' GROUP BY", sql, flags=re.IGNORECASE, count=1)
+
+    # Auto-fix nonexistent [RoadType] on nmVWZonewiseRoadLength (replace with [RoadClass])
+    if re.search(r"\bnmVWZonewiseRoadLength\b", sql, re.IGNORECASE):
+        sql = re.sub(r"(?:\[RoadType\]|\bRoadType\b)", "[RoadClass]", sql, flags=re.IGNORECASE)
+
     return sql
 
 

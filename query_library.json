@@ -270,6 +270,46 @@
       "source": "manual",
       "added_on": "2026-11-02",
       "enabled": true
+    },
+    {
+      "id": "roughness_by_category",
+      "question": "Show road roughness condition breakdown",
+      "sql": "SELECT [Catg], ROUND(SUM([Length (km)]), 2) AS [TotalLengthKm] FROM [dbo].[risVWStateWiseRgh] WHERE [surveyid] = '2025' GROUP BY [Catg] ORDER BY [TotalLengthKm] DESC",
+      "scope": "*",
+      "notes": "Query risVWStateWiseRgh using Catg and Length (km) with surveyid='2025'",
+      "source": "manual",
+      "added_on": "2026-11-02",
+      "enabled": true
+    },
+    {
+      "id": "roads_in_good_condition",
+      "question": "How many kilometers of roads are in Good condition?",
+      "sql": "SELECT ROUND(SUM([Length (km)]), 2) AS [GoodLengthKm] FROM [dbo].[risVWStateWiseRgh] WHERE [Catg] = 'Good' AND [surveyid] = '2025'",
+      "scope": "*",
+      "notes": "Filter risVWStateWiseRgh by Catg='Good' and surveyid='2025'",
+      "source": "manual",
+      "added_on": "2026-11-02",
+      "enabled": true
+    },
+    {
+      "id": "poor_and_very_poor_roads",
+      "question": "Total length of Poor and Very Poor roads",
+      "sql": "SELECT ROUND(SUM([Length (km)]), 2) AS [PoorLengthKm] FROM [dbo].[risVWStateWiseRgh] WHERE [Catg] IN ('Poor', 'Very Poor') AND [surveyid] = '2025'",
+      "scope": "*",
+      "notes": "Filter risVWStateWiseRgh by Catg IN ('Poor', 'Very Poor') and surveyid='2025'",
+      "source": "manual",
+      "added_on": "2026-11-02",
+      "enabled": true
+    },
+    {
+      "id": "road_type_percentage_distribution",
+      "question": "What is the percentage distribution of road types across the network?",
+      "sql": "WITH RoadTypeTotals AS (SELECT SUM([Single lane]) AS [SingleLane], SUM([Intermediate lane]) AS [IntermediateLane], SUM([Double lane]) AS [DoubleLane], SUM([2L+PS]) AS [TwoLanePS], SUM([Four lane]) AS [FourLane], SUM([Six Lane]) AS [SixLane], SUM(COALESCE([Single lane],0) + COALESCE([Intermediate lane],0) + COALESCE([Double lane],0) + COALESCE([2L+PS], 0) + COALESCE([Four lane], 0) + COALESCE([Six Lane], 0)) AS [TotalNetwork] FROM [dbo].[VWRoadtypePivot] WHERE [SurveyID] = '2025') SELECT ROUND([SingleLane] * 100.0 / [TotalNetwork], 1) AS [SingleLane_Pct], ROUND([IntermediateLane] * 100.0 / [TotalNetwork], 1) AS [IntermediateLane_Pct], ROUND([DoubleLane] * 100.0 / [TotalNetwork], 1) AS [DoubleLane_Pct], ROUND([TwoLanePS] * 100.0 / [TotalNetwork], 1) AS [TwoLanePS_Pct], ROUND([FourLane] * 100.0 / [TotalNetwork], 1) AS [FourLane_Pct], ROUND([SixLane] * 100.0 / [TotalNetwork], 1) AS [SixLane_Pct] FROM RoadTypeTotals",
+      "scope": "*",
+      "notes": "Calculate percentage distribution of road types from VWRoadtypePivot matching the dashboard donut chart",
+      "source": "manual",
+      "added_on": "2026-11-02",
+      "enabled": true
     }
   ]
 }
